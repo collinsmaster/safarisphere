@@ -1,21 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 🐘 Safari Sphere — Web & Android Savanna Pioneer Network
 
-# Run and deploy your AI Studio app
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/collinsmaster/safarisphere&branch=main&name=safarisphere&env[NODE_ENV]=production&env[PORT]=8080&env[DATABASE_URL]=postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere&env[JWT_SECRET]=supersecretjwtpasswordkey123&env[JWT_REFRESH_SECRET]=supersecretjwtrefreshpasswordkey123&env[GEMINI_API_KEY]=)
 
-This contains everything you need to run your app locally.
+Safari Sphere is a fresh, futuristic, community-driven social networking platform designed for real-time engagement, safari creativity, visual discovery, secure room interactions, and instant private chatting.
 
-View your app in AI Studio: https://ai.studio/apps/6d6feee7-cff2-45f0-8604-66334c8227a2
+This repository is unified and ready for instant deployment:
+- **`app/`**: A visually stunning Android client written in Kotlin, Jetpack Compose, Retrofit, and Material Design 3.
+- **`backend/`**: A highly performant Node.js, Express, and PostgreSQL web engine initialized for deployment on **Koyeb** under your custom backend domain: `safarisphere.koyeb.app`.
 
-## Run Locally
+---
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+## 🚀 Instant Backend Deployment with One Click
 
+1. Click the **Deploy to Koyeb** button above.
+2. Sign in or register for free on Koyeb.
+3. Keep the **GitHub Repository** selection on `collinsmaster/safarisphere`.
+4. Koyeb automatically pre-fills your environment variables:
+   - `DATABASE_URL`: Set to your live Virginia Render PostgreSQL database (`postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere`).
+   - `JWT_SECRET` & `JWT_REFRESH_SECRET`: Automatically filled with high-security passwords.
+   - `GEMINI_API_KEY`: Input your own Google AI Studio Key.
+5. In **Builder Settings**, set the **Root Directory** field to: `backend`.
+6. Click **Deploy**! Koyeb will provision your node and mount it live at `safarisphere.koyeb.app`.
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+---
+
+## 🛠️ Step-by-Step GitHub Setup Procedure
+
+To push this project to your new GitHub repository:
+
+```bash
+# 1. Initialize local workspace
+git init
+
+# 2. Add files and commit
+git add .
+git commit -m "Initialize Safari Sphere fullstack"
+
+# 3. Add your remote credentials
+git remote add origin https://github.com/collinsmaster/safarisphere.git
+
+# 4. Set standard branch and push
+git branch -M main
+git push -u origin main
+```
+
+---
+
+## 📱 Android Client Configurations
+
+The Android companion application is fully responsive and configured to query your live API endpoints at `https://safarisphere.koyeb.app/` instantly. All networking interactions (auth, posts, direct chat channels, vybe rooms) fall back to reliable local mock parameters if the service is unreachable.

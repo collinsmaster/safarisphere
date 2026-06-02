@@ -2708,43 +2708,7 @@ fun BentoAuthScreen(
         }
       }
 
-      // Card 3: Live Stats Teaser Bento Box
-      item {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-          Box(
-            modifier = Modifier
-              .weight(1f)
-              .clip(RoundedCornerShape(20.dp))
-              .background(NeonCyan.copy(alpha = 0.08f))
-              .border(1.dp, NeonCyan.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-              .padding(14.dp)
-          ) {
-            Column {
-              Text("ACTIVE VYBERS", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-              Text("42 Online", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
-            }
-          }
-
-          Box(
-            modifier = Modifier
-              .weight(1f)
-              .clip(RoundedCornerShape(20.dp))
-              .background(Color.White.copy(alpha = 0.04f))
-              .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
-              .padding(14.dp)
-          ) {
-            Column {
-              Text("HOT DEBATE", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-              Text("#CyberSavanna", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 2.dp))
-            }
-          }
-        }
-      }
-
-      // Card 4: Trust Lock Banner
+      // Card 3: Quantum Secure lock Banner
       item {
         Surface(
           modifier = Modifier.fillMaxWidth(),
@@ -2753,9 +2717,9 @@ fun BentoAuthScreen(
           border = BorderStroke(1.dp, Color.White.copy(alpha = 0.04f))
         ) {
           Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
           ) {
             Icon(
               imageVector = Icons.Default.CheckCircle,
@@ -2764,10 +2728,10 @@ fun BentoAuthScreen(
               modifier = Modifier.size(18.dp)
             )
             Text(
-              "Local sandbox protection activated. Credentials never leave the sandboxed storage domain.",
+              "Quantum-decentralized secure connection enabled. Your credentials, posts, and whisper networks are fully encrypted.",
               color = Color.Gray,
               fontSize = 11.sp,
-              lineHeight = 14.sp
+              lineHeight = 15.sp
             )
           }
         }

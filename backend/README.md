@@ -1,8 +1,10 @@
 # 🚀 Safari Sphere Social Backend Engine
 
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/your-github-username/safari-sphere&branch=main&name=safari-sphere&env[NODE_ENV]=production&env[PORT]=8080&env[DATABASE_URL]=&env[JWT_SECRET]=&env[JWT_REFRESH_SECRET]=&env[GEMINI_API_KEY]=)
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/collinsmaster/safarisphere&branch=main&name=safarisphere&env[NODE_ENV]=production&env[PORT]=8080&env[DATABASE_URL]=postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere&env[JWT_SECRET]=supersecretjwtpasswordkey123&env[JWT_REFRESH_SECRET]=supersecretjwtrefreshpasswordkey123&env[GEMINI_API_KEY]=)
 
 Safari Sphere is a fresh, futuristic, community-driven social networking platform designed for real-time engagement, creativity, visual discovery, and interactive gamification. This is the production-ready Node.js + Express + PostgreSQL + Socket.IO backend repository, optimized for high performance, server-side Google Gemini AI integration, and instant deployment on **Koyeb**.
+
+### 🔗 Public Backend Live Link: `https://safarisphere.koyeb.app/`
 
 ---
 
@@ -20,41 +22,32 @@ The system utilizes a modern, robust **Controller-Service-Repository** architect
 Koyeb is a developer-friendly serverless app platform. You can deploy Safari Sphere in minutes from your GitHub fork.
 
 ### Step 1: Push Your Code to GitHub
-Create a fresh, private or public GitHub Repository and push the Safari Sphere code to it:
+Create a fresh, public or private GitHub Repository and push the Safari Sphere code to it:
 ```bash
 git init
 git add .
 git commit -m "Initialize Safari Sphere stack"
-git remote add origin https://github.com/your-github-username/safari-sphere.git
+git remote add origin https://github.com/collinsmaster/safarisphere.git
 git branch -M main
 git push -u origin main
 ```
 
-### Step 2: Provision a PostgreSQL Database on Koyeb
-1. Sign in to your **Koyeb Console** (https://app.koyeb.com/).
-2. Click **Create** -> **Database**.
-3. Choose **PostgreSQL**, pick your nearest region, configure the **Free Tier**, and click **Create**.
-4. Koyeb will generate a secret `DATABASE_URL` for you. **Copy this string immediately!** (It looks like `postgres://user:password@hostname:5432/dbname?sslmode=require`).
+### Step 2: Use Your Live Render PostgreSQL Database
+Your active PostgreSQL connection string is pre-configured in the deploy link:
+`postgresql://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere`
 
-### Step 3: Deploy the Backend Service
-1. In your Koyeb console, click **Create** -> **Service**.
-2. Select **GitHub** as the deployment provider.
-3. Choose your `safari-sphere` repository.
-4. In the **Builder and Run Settings**:
-   - Set the **Root Directory** to `backend` (or leave as `/` if your repository only contains the backend code).
-   - The platform will automatically identify the `Dockerfile` and build the container!
-5. In **Environment Variables**, add the following required production keys:
+We also added a database bootstrapper utility. To initialize tables on your remote PostgreSQL, run local configuration or let the service run.
 
-| Key | Value Purpose / Example |
-| :--- | :--- |
-| `NODE_ENV` | Set to `production` |
-| `PORT` | Set to `8080` (Koyeb automatically routes incoming traffic to this port) |
-| `DATABASE_URL` | Enter the connection string copied from Step 2 |
-| `JWT_SECRET` | A secure long cryptographic key for signups (e.g., `s9f8gjh4762jhdwq9031`) |
-| `JWT_REFRESH_SECRET` | A distinct secure cryptographic key for token rotation |
-| `GEMINI_API_KEY` | Your Google Gemini API Key from **AI Studio Secrets** (For SphereMate companion) |
-
-6. Click **Deploy**! Koyeb will provision, compile, build your Docker environment, and provide you with a public endpoint link (e.g., `https://safari-sphere-xxx.koyeb.app`).
+### Step 3: Deployment Procedure
+1. Click the **Deploy to Koyeb** button at the top of this file.
+2. Sign in or register your Koyeb account.
+3. You will be redirected to the service configuration form where all empty environment variables are pre-loaded!
+4. **Fill in the variables**:
+   - `DATABASE_URL`: Pre-loaded with your Virginia Render postgres link! Keep it or customize as needed.
+   - `JWT_SECRET` & `JWT_REFRESH_SECRET`: Secure session hash salts.
+   - `GEMINI_API_KEY`: Input your custom Google AI Studio Key.
+5. In the **Builder Settings**, set the **Root Directory** field to `backend`.
+6. Click **Deploy**. Koyeb will compile the project and assign your custom subdomain `safarisphere.koyeb.app`!
 
 ---
 
