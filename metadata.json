@@ -1,0 +1,6 @@
+{
+  "name": "Safari Sphere",
+  "description": "A fresh, futuristic, community-driven social networking platform for real engagement and discovery. Built on a production-ready PostgreSQL + Node.js backend with a stunning Android premium client.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
