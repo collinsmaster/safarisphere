@@ -26,7 +26,8 @@ data class AuthResponse(
   val message: String? = null,
   val token: String? = null,
   @Json(name = "refreshToken") val refreshToken: String? = null,
-  val user: AuthUser? = null
+  val user: AuthUser? = null,
+  val requiresOtp: Boolean? = null
 )
 
 data class BackendPost(
@@ -125,6 +126,9 @@ interface SafariSphereApi {
 
   @GET("auth/explorers")
   suspend fun getExplorers(): List<BackendExplorer>
+
+  @POST("auth/profile/edit")
+  suspend fun editProfile(@Body body: Map<String, String>): Map<String, Any>
 
   @GET("posts")
   suspend fun getPosts(@Query("category") category: String? = null): List<BackendPost>

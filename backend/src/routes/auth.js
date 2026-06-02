@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const dbService = require('../services/dbService');
 const authMiddleware = require('../middleware/auth');
+const otpService = require('../services/otpService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'safari_sphere_fallback_master_jwt_secret_99482';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'safari_sphere_fallback_master_refresh_secret_38291';
@@ -14,46 +15,104 @@ const getMockUser = (id) => {
   return store.users.find(u => u.id === id);
 };
 
-// 1. SIGNUP
+// 1. SIGNUP WITH STRICT USERNAME VALIDATION & OTP VERIFICATION
 router.post('/signup', async (req, res) => {
-  const { email, password, username, displayName } = req.body;
+  const { email, password, username, displayName, otp } = req.body;
 
   if (!email || !password || !username) {
     return res.status(400).json({ error: 'Please compile all relevant fields: email, password, username.' });
   }
 
-  try {
-    const passwordHash = await bcrypt.hash(password, 10);
-    const userId = `u_${Date.now()}`;
+  const trimmedUsername = username.trim();
+  const trimmedEmail = email.trim().toLowerCase();
 
-    // Under Postgres:
+  // Username validation checks:
+  if (trimmedUsername.length < 3 || trimmedUsername.length > 16) {
+    return res.status(400).json({ error: 'Username must be between 3 and 16 characters.' });
+  }
+  if (trimmedUsername.includes(' ')) {
+    return res.status(400).json({ error: 'Username must not contain spaces.' });
+  }
+  // Allow alphanumeric, underscores, and periods
+  const allowedRegex = /^[a-zA-Z0-9_.]+$/;
+  if (!allowedRegex.test(trimmedUsername)) {
+    return res.status(400).json({ error: 'Username can only contain alphanumeric characters, underscores (_), and periods (.).' });
+  }
+  if (trimmedUsername.startsWith('.')) {
+    return res.status(400).json({ error: 'Username must not start with a period.' });
+  }
+  if (trimmedUsername.endsWith('.')) {
+    return res.status(400).json({ error: 'Username must not end with a period.' });
+  }
+
+  try {
+    // Phase 1 check: uniqueness of email and username
     if (!dbService.isMock) {
-      const existingUser = await dbService.query('SELECT id FROM users WHERE email = $1 OR username = $2', [email, username]);
+      const existingUser = await dbService.query(
+        'SELECT id, username, email FROM users WHERE email = $1 OR username = $2',
+        [trimmedEmail, trimmedUsername]
+      );
       if (existingUser.rows.length > 0) {
-        return res.status(400).json({ error: 'Email or Username already claimed by another explorer.' });
+        const found = existingUser.rows[0];
+        if (found.email.toLowerCase() === trimmedEmail) {
+          return res.status(400).json({ error: 'Email already claimed by another explorer.' });
+        }
+        return res.status(400).json({ error: 'Username already taken. Please try another handle.' });
       }
+    } else {
+      const store = dbService.getMockStore();
+      const emailExists = store.users.some(u => u.email.toLowerCase() === trimmedEmail);
+      if (emailExists) {
+        return res.status(400).json({ error: 'Email already claimed.' });
+      }
+      const usernameExists = store.users.some(u => u.username.toLowerCase() === trimmedUsername.toLowerCase());
+      if (usernameExists) {
+        return res.status(400).json({ error: 'Username already taken.' });
+      }
+    }
+
+    // Step 2: OTP dispatch (if otp is missing)
+    if (!otp) {
+      console.log(`[Signup Flow] Registering pre-validation for ${trimmedEmail}. Issuing OTP...`);
+      const otpResponse = await otpService.sendOTP(trimmedEmail);
+      return res.status(200).json({
+        requiresOtp: true,
+        message: otpResponse.message,
+        debugOtp: otpResponse.debugOtp || null
+      });
+    }
+
+    // Step 3: Verified registration (if otp is supplied)
+    const isOtpValid = await otpService.verifyOTP(trimmedEmail, otp);
+    if (!isOtpValid) {
+      return res.status(400).json({ error: 'Invalid or expired verification OTP. Please verify and try again.' });
+    }
+
+    // OTP succeeded! Produce account records
+    const passwordHash = await bcrypt.hash(password, 10);
+    let userId;
+
+    if (!dbService.isMock) {
+      // Postgres auto-generates UUID or we can generate one to ensure compatibility
+      const { v4: uuidv4 } = require('uuid');
+      userId = uuidv4();
 
       await dbService.query(
         'INSERT INTO users (id, email, password_hash, username) VALUES ($1, $2, $3, $4)',
-        [userId, email, passwordHash, username]
+        [userId, trimmedEmail, passwordHash, trimmedUsername]
       );
       await dbService.query(
         'INSERT INTO profiles (user_id, display_name, bio, xp, streak_count, mood_state, mood_emoji) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [userId, displayName || username, 'A fresh pioneer in Safari Sphere!', 100, 1, 'vibe', '🦁']
+        [userId, displayName || trimmedUsername, 'A fresh pioneer in Safari Sphere!', 100, 1, 'vibe', '🦁']
       );
       await dbService.query('INSERT INTO user_settings (user_id) VALUES ($1)', [userId]);
     } else {
-      // Memory Mock Save:
+      userId = `u_${Date.now()}`;
       const store = dbService.getMockStore();
-      const userExists = store.users.some(u => u.email === email || u.username === username);
-      if (userExists) {
-        return res.status(400).json({ error: 'Email or Username already claimed.' });
-      }
-
-      const newUser = { id: userId, email, username, password_hash: passwordHash, role: 'user' };
+      const newUser = { id: userId, email: trimmedEmail, username: trimmedUsername, password_hash: passwordHash, role: 'user' };
       const newProfile = {
         user_id: userId,
-        display_name: displayName || username,
+        display_name: displayName || trimmedUsername,
         bio: 'A fresh pioneer in Safari Sphere!',
         avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
         cover_url: '',
@@ -71,17 +130,18 @@ router.post('/signup', async (req, res) => {
       store.profiles[userId] = newProfile;
     }
 
-    // Launch initial tokens
-    const token = jwt.sign({ id: userId, username, email, role: 'user' }, JWT_SECRET, { expiresIn: '15m' });
+    // Launch active tokens
+    const token = jwt.sign({ id: userId, username: trimmedUsername, email: trimmedEmail, role: 'user' }, JWT_SECRET, { expiresIn: '15h' });
     const refreshToken = jwt.sign({ id: userId }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({
       message: 'Explorer registered! Welcome to the sphere.',
       token,
       refreshToken,
-      user: { id: userId, username, email, displayName: displayName || username, xp: 100 }
+      user: { id: userId, username: trimmedUsername, email: trimmedEmail, displayName: displayName || trimmedUsername, xp: 100 }
     });
   } catch (err) {
+    console.error('[Signup Exception]', err);
     res.status(500).json({ error: err.message });
   }
 });

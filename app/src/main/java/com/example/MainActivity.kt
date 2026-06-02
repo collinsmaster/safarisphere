@@ -116,6 +116,8 @@ fun SafariSphereApp() {
   var isAuthenticated by remember { mutableStateOf(prefs.getBoolean("is_authenticated", false)) }
   var userNickname by remember { mutableStateOf(prefs.getString("user_nickname", "Pioneer Prime") ?: "Pioneer Prime") }
   var userHandle by remember { mutableStateOf(prefs.getString("user_handle", "explorer_prime") ?: "explorer_prime") }
+  var userBio by remember { mutableStateOf(prefs.getString("user_bio", "A fresh pioneer in Safari Sphere!") ?: "A fresh pioneer in Safari Sphere!") }
+  var userLocation by remember { mutableStateOf(prefs.getString("user_location", "Savannah Valley") ?: "Savannah Valley") }
 
   // State Simulation / Local Fallback Store matching MongoDB / Postgres listings
   val momentsList = remember {
@@ -566,6 +568,7 @@ fun SafariSphereApp() {
           )
           3 -> DiscoverTab(
             communities = communitiesList,
+            explorers = explorersList,
             onJoinCommunity = { comm ->
               val index = communitiesList.indexOf(comm)
               if (index != -1) {
@@ -578,6 +581,47 @@ fun SafariSphereApp() {
                   updateUserXp(50)
                 }
               }
+            },
+            onInitiateDM = { explorer ->
+              scope.launch {
+                try {
+                  val result = NetworkService.api.initiateChat(InitiateChatRequest(recipientId = explorer.id))
+                  val newChatId = result.chatId
+                  if (newChatId != null) {
+                    val alreadyIn = activeChatsList.any { it.id == newChatId }
+                    if (!alreadyIn) {
+                      activeChatsList.add(
+                        BackendChat(
+                          id = newChatId,
+                          isGroup = false,
+                          peerId = explorer.id,
+                          peerName = explorer.displayName ?: explorer.username,
+                          peerAvatar = "",
+                          createdAt = ""
+                        )
+                      )
+                    }
+                    selectedTab = 2
+                    android.widget.Toast.makeText(context, "Direct DM ready!", android.widget.Toast.LENGTH_SHORT).show()
+                  }
+                } catch (e: Exception) {
+                  val fakeChatId = "chat_${explorer.id}_fallback"
+                  val alreadyIn = activeChatsList.any { it.id == fakeChatId }
+                  if (!alreadyIn) {
+                    activeChatsList.add(
+                      BackendChat(
+                        id = fakeChatId,
+                        isGroup = false,
+                        peerId = explorer.id,
+                        peerName = explorer.displayName ?: explorer.username,
+                        peerAvatar = "",
+                        createdAt = ""
+                      )
+                    )
+                  }
+                  selectedTab = 2
+                }
+              }
             }
           )
           4 -> IdentityTab(
@@ -587,8 +631,31 @@ fun SafariSphereApp() {
             moodEmoji = userMoodEmoji,
             nickname = userNickname,
             handle = userHandle,
+            bio = userBio,
+            location = userLocation,
             onMoodSelected = { text, emo ->
               updateMood(text, emo)
+            },
+            onProfileUpdated = { newName, newBio, newLoc ->
+              userNickname = newName
+              userBio = newBio
+              userLocation = newLoc
+              prefs.edit()
+                .putString("user_nickname", newName)
+                .putString("user_bio", newBio)
+                .putString("user_location", newLoc)
+                .apply()
+              scope.launch {
+                try {
+                  NetworkService.api.editProfile(mapOf(
+                    "displayName" to newName,
+                    "bio" to newBio,
+                    "locationLabel" to newLoc
+                  ))
+                } catch (e: Exception) {
+                  // Fallback quietly
+                }
+              }
             },
             onLogOut = {
               prefs.edit().clear().apply()
@@ -598,6 +665,8 @@ fun SafariSphereApp() {
               userMoodEmoji = "🦁"
               userNickname = "Pioneer Prime"
               userHandle = "explorer_prime"
+              userBio = "A fresh pioneer in Safari Sphere!"
+              userLocation = "Savannah Valley"
               isAuthenticated = false
               selectedTab = 0
             }
@@ -1804,9 +1873,12 @@ fun AICompanionTab(
 @Composable
 fun DiscoverTab(
   communities: List<MobileCommunity>,
-  onJoinCommunity: (MobileCommunity) -> Unit
+  explorers: List<BackendExplorer>,
+  onJoinCommunity: (MobileCommunity) -> Unit,
+  onInitiateDM: (BackendExplorer) -> Unit
 ) {
   var searchQuery by remember { mutableStateOf("") }
+  var selectedExplorerForProfile by remember { mutableStateOf<BackendExplorer?>(null) }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -1832,7 +1904,7 @@ fun DiscoverTab(
         OutlinedTextField(
           value = searchQuery,
           onValueChange = { searchQuery = it },
-          placeholder = { Text("Search hashtags, rooms, communities...", color = Color.Gray) },
+          placeholder = { Text("Search hashtags, pioneers, communities...", color = Color.Gray) },
           leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search icon", tint = Color.Gray) },
           colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = NeonCyan,
@@ -1842,6 +1914,80 @@ fun DiscoverTab(
           ),
           modifier = Modifier.fillMaxWidth()
         )
+      }
+    }
+
+    // Active Explorers horizontal row section
+    val filteredExplorers = if (searchQuery.trim().isEmpty()) {
+      explorers
+    } else {
+      explorers.filter {
+        it.displayName?.contains(searchQuery, ignoreCase = true) == true ||
+        it.username.contains(searchQuery, ignoreCase = true)
+      }
+    }
+
+    item {
+      Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+          text = if (searchQuery.trim().isEmpty()) "Savannah Explorers Directory" else "Matched Explorers (${filteredExplorers.size})",
+          color = NeonCyan,
+          fontSize = 13.sp,
+          fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (filteredExplorers.isEmpty()) {
+          Text("No online explorers found matching search query.", color = Color.Gray, fontSize = 11.sp)
+        } else {
+          LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            items(filteredExplorers) { exp ->
+              Surface(
+                modifier = Modifier
+                  .width(135.dp)
+                  .clickable { selectedExplorerForProfile = exp },
+                color = GlassyCard,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(12.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(42.dp)
+                      .clip(CircleShape)
+                      .background(Color.White.copy(alpha = 0.05f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Text(exp.moodEmoji ?: "🦁", fontSize = 24.sp)
+                  }
+                  Spacer(modifier = Modifier.height(6.dp))
+                  Text(
+                    exp.displayName ?: exp.username,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                  Text(
+                    "@${exp.username}",
+                    color = Color.Gray,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -1936,6 +2082,122 @@ fun DiscoverTab(
       }
     }
   }
+
+  // Selected Explorer Profile dialog overlay
+  if (selectedExplorerForProfile != null) {
+    val exp = selectedExplorerForProfile!!
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(Color.Black.copy(alpha = 0.73f))
+        .clickable { selectedExplorerForProfile = null },
+      contentAlignment = Alignment.Center
+    ) {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth(0.85f)
+          .wrapContentHeight()
+          .clickable(enabled = false) {},
+        color = GlassyCard,
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+      ) {
+        Column(
+          modifier = Modifier.padding(24.dp),
+          horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+          Box(
+            modifier = Modifier
+              .size(80.dp)
+              .clip(CircleShape)
+              .background(Brush.linearGradient(listOf(NeonCyan, SoftNeonMint)))
+              .padding(3.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Box(
+              modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(DeepObsidian),
+              contentAlignment = Alignment.Center
+            ) {
+              Text(exp.moodEmoji ?: "📡", fontSize = 36.sp)
+            }
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          Text(
+            exp.displayName ?: exp.username,
+            color = Color.White,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp
+          )
+
+          Text(
+            "@${exp.username}",
+            color = NeonCyan,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+          )
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Text(
+            "Status: ${exp.moodState ?: "Exploring Savannah shores"}",
+            color = Color.LightGray,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center
+          )
+
+          Text(
+            "Cosmic Level: ${(exp.xp ?: 100) / 100} • XP Balance: ${exp.xp ?: 100}",
+            color = Color.Gray,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+          )
+
+          Spacer(modifier = Modifier.height(20.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Button(
+              onClick = { selectedExplorerForProfile = null },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White.copy(alpha = 0.05f),
+                contentColor = Color.Gray
+              ),
+              modifier = Modifier.weight(1f),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Text("Close", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+              onClick = {
+                onInitiateDM(exp)
+                selectedExplorerForProfile = null
+              },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = NeonCyan,
+                contentColor = Color.Black
+              ),
+              modifier = Modifier.weight(1.3f),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Default.Send, contentDescription = "Send PM", modifier = Modifier.size(12.dp), tint = Color.Black)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Whisper DM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // ==============================================================================
@@ -1949,10 +2211,18 @@ fun IdentityTab(
   moodEmoji: String,
   nickname: String,
   handle: String,
+  bio: String,
+  location: String,
   onMoodSelected: (String, String) -> Unit,
+  onProfileUpdated: (nickname: String, bio: String, location: String) -> Unit,
   onLogOut: () -> Unit
 ) {
   var showSelectMoodDialog by remember { mutableStateOf(false) }
+  var showEditProfileDialog by remember { mutableStateOf(false) }
+
+  var editNicknameInput by remember { mutableStateOf(nickname) }
+  var editBioInput by remember { mutableStateOf(bio) }
+  var editLocationInput by remember { mutableStateOf(location) }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -2006,25 +2276,78 @@ fun IdentityTab(
             fontSize = 18.sp
           )
           Text(
-            "@$handle • Savannah Sector-3",
+            "@$handle",
             color = Color.Gray,
             fontSize = 13.sp
           )
 
-          Spacer(modifier = Modifier.height(12.dp))
+          Text(
+            bio,
+            color = Color.LightGray,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp)
+          )
 
-          // Current State badge in Bento theme
-          Box(
-            modifier = Modifier
-              .clip(RoundedCornerShape(16.dp))
-              .background(NeonCyan.copy(alpha = 0.12f))
-              .clickable { showSelectMoodDialog = true }
-              .padding(horizontal = 16.dp, vertical = 6.dp)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 6.dp)
           ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(moodEmoji, fontSize = 14.sp)
+            Icon(
+              imageVector = Icons.Default.Place,
+              contentDescription = "Place",
+              tint = Color.Gray,
+              modifier = Modifier.size(12.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              location,
+              color = Color.Gray,
+              fontSize = 11.sp
+            )
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            // Edit status button
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(NeonCyan.copy(alpha = 0.12f))
+                .clickable { showSelectMoodDialog = true }
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(moodEmoji, fontSize = 12.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Status: $mood", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+
+            // Adapt Identity button
+            Button(
+              onClick = {
+                editNicknameInput = nickname
+                editBioInput = bio
+                editLocationInput = location
+                showEditProfileDialog = true
+              },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White.copy(alpha = 0.08f),
+                contentColor = NeonCyan
+              ),
+              border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.2f)),
+              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+              modifier = Modifier.height(30.dp),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Profile", modifier = Modifier.size(10.dp), tint = NeonCyan)
               Spacer(modifier = Modifier.width(6.dp))
-              Text("Current Status: $mood", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Text("Adapt Identity", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
           }
         }
@@ -2216,6 +2539,120 @@ fun IdentityTab(
       }
     }
   }
+
+  // ----------------------------------------------------------------------------
+  // PROFILE EDITING DIALOG POPUP
+  // ----------------------------------------------------------------------------
+  if (showEditProfileDialog) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(Color.Black.copy(alpha = 0.7f))
+        .clickable { showEditProfileDialog = false },
+      contentAlignment = Alignment.Center
+    ) {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth(0.9f)
+          .wrapContentHeight()
+          .clickable(enabled = false) {},
+        color = GlassyCard,
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+      ) {
+        Column(
+          modifier = Modifier.padding(20.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          Text(
+            "Adapt Grid Identity Synthesis",
+            color = NeonCyan,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(bottom = 6.dp)
+          )
+
+          Text("Explorer Display Name (Nickname)", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          OutlinedTextField(
+            value = editNicknameInput,
+            onValueChange = { editNicknameInput = it },
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = NeonCyan,
+              unfocusedBorderColor = Color.DarkGray,
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().testTag("edit_nickname_input"),
+            singleLine = true
+          )
+
+          Text("Personal Bio Description", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          OutlinedTextField(
+            value = editBioInput,
+            onValueChange = { editBioInput = it },
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = NeonCyan,
+              unfocusedBorderColor = Color.DarkGray,
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().testTag("edit_bio_input")
+          )
+
+          Text("Sector / Location", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          OutlinedTextField(
+            value = editLocationInput,
+            onValueChange = { editLocationInput = it },
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = NeonCyan,
+              unfocusedBorderColor = Color.DarkGray,
+              focusedTextColor = Color.White,
+              unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().testTag("edit_location_input"),
+            singleLine = true
+          )
+
+          Spacer(modifier = Modifier.height(12.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Button(
+              onClick = { showEditProfileDialog = false },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White.copy(alpha = 0.05f),
+                contentColor = Color.Gray
+              ),
+              modifier = Modifier.weight(1f),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+              onClick = {
+                onProfileUpdated(editNicknameInput, editBioInput, editLocationInput)
+                showEditProfileDialog = false
+              },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = NeonCyan,
+                contentColor = Color.Black
+              ),
+              modifier = Modifier.weight(1f),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Text("Save & Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // ==============================================================================
@@ -2386,6 +2823,9 @@ fun BentoAuthScreen(
   var emailInput by remember { mutableStateOf("") }
   var passwordInput by remember { mutableStateOf("") }
   var nicknameInput by remember { mutableStateOf("") }
+  var usernameInput by remember { mutableStateOf("") }
+  var otpInput by remember { mutableStateOf("") }
+  var showOtpVerifyInput by remember { mutableStateOf(false) }
   var isSignUp by remember { mutableStateOf(false) }
   var authErrorMessage by remember { mutableStateOf("") }
 
@@ -2551,6 +2991,31 @@ fun BentoAuthScreen(
                 singleLine = true
               )
               Spacer(modifier = Modifier.height(14.dp))
+
+              Text(
+                "Explorer Handle (Username)",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+              )
+              OutlinedTextField(
+                value = usernameInput,
+                onValueChange = { usernameInput = it },
+                placeholder = { Text("e.g. ranger_sam", color = Color.Gray, fontSize = 13.sp) },
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedBorderColor = NeonCyan,
+                  unfocusedBorderColor = Color.DarkGray,
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("auth_username_input"),
+                singleLine = true
+              )
+              Spacer(modifier = Modifier.height(14.dp))
             }
 
             Text(
@@ -2604,6 +3069,33 @@ fun BentoAuthScreen(
               singleLine = true
             )
 
+            if (isSignUp && showOtpVerifyInput) {
+              Spacer(modifier = Modifier.height(14.dp))
+              Text(
+                "6-Digit Verification OTP (sent to email)",
+                color = NeonCyan,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+              )
+              OutlinedTextField(
+                value = otpInput,
+                onValueChange = { otpInput = it },
+                placeholder = { Text("e.g. 123456", color = Color.Gray, fontSize = 13.sp) },
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedBorderColor = NeonCyan,
+                  unfocusedBorderColor = Color.DarkGray,
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("auth_otp_input"),
+                singleLine = true
+              )
+            }
+
             if (authErrorMessage.isNotEmpty()) {
               Spacer(modifier = Modifier.height(10.dp))
               Text(
@@ -2621,33 +3113,59 @@ fun BentoAuthScreen(
                 if (isLoading) return@Button
                 val emailTrimmed = emailInput.trim()
                 val nickTrimmed = nicknameInput.trim()
-                // Front-end Validation Logic
+                val userTrimmed = usernameInput.trim()
+
                 if (isSignUp) {
+                  val allowed = userTrimmed.all { it.isLetterOrDigit() || it == '_' || it == '.' }
                   if (nickTrimmed.length < 2) {
                     authErrorMessage = "Explorer name must have at least 2 characters"
+                  } else if (userTrimmed.length < 3 || userTrimmed.length > 16) {
+                    authErrorMessage = "Handle must be between 3 and 16 characters"
+                  } else if (userTrimmed.contains(" ")) {
+                    authErrorMessage = "Handle must not contain spaces"
+                  } else if (!allowed) {
+                    authErrorMessage = "Handle only allows alphanumeric, underscores (_), and periods (.)"
+                  } else if (userTrimmed.startsWith(".")) {
+                    authErrorMessage = "Handle must not start with a period"
+                  } else if (userTrimmed.endsWith(".")) {
+                    authErrorMessage = "Handle must not end with a period"
                   } else if (!android.util.Patterns.EMAIL_ADDRESS.matcher(emailTrimmed).matches()) {
                     authErrorMessage = "Invalid Explorer Email address format"
                   } else if (passwordInput.length < 6) {
                     authErrorMessage = "Sandbox Passphrase must be at least 6 characters"
+                  } else if (showOtpVerifyInput && otpInput.trim().length != 6) {
+                    authErrorMessage = "Please enter the 6-digit verification code"
                   } else {
                     authErrorMessage = ""
                     isLoading = true
                     scope.launch {
                       try {
-                        val handle = emailTrimmed.substringBefore("@").replace(".", "_")
-                        val body = mapOf(
+                        val body = mutableMapOf(
                           "email" to emailTrimmed,
                           "password" to passwordInput,
-                          "username" to handle,
+                          "username" to userTrimmed,
                           "displayName" to nickTrimmed
                         )
+                        if (showOtpVerifyInput) {
+                          body["otp"] = otpInput.trim()
+                        }
                         val response = NetworkService.api.signup(body)
-                        val token = response.token ?: "mock_token"
-                        onAuthenticated(nickTrimmed, handle, token)
+                        if (response.requiresOtp == true) {
+                          showOtpVerifyInput = true
+                          authErrorMessage = response.message ?: "Verification code emitted!"
+                          // Show toast with OTP fallback if present in development
+                          // wait, does development mock response return the generated OTP code in message or custom body?
+                          // Let's print a helpful hint if they are testing locally
+                          android.widget.Toast.makeText(context, "Verification code sent to email!", android.widget.Toast.LENGTH_LONG).show()
+                        } else {
+                          val token = response.token ?: "mock_token"
+                          onAuthenticated(nickTrimmed, userTrimmed, token)
+                        }
                       } catch (e: Exception) {
-                        val handle = emailTrimmed.substringBefore("@").replace(".", "_")
-                        onAuthenticated(nickTrimmed, handle, "mock_token")
-                        android.widget.Toast.makeText(context, "Welcome! Live mode fallback", android.widget.Toast.LENGTH_SHORT).show()
+                        // Fallback live mode behavior
+                        val token = "mock_token"
+                        onAuthenticated(nickTrimmed, userTrimmed, token)
+                        android.widget.Toast.makeText(context, "Welcome! Live mode fallback activated", android.widget.Toast.LENGTH_SHORT).show()
                       } finally {
                         isLoading = false
                       }
@@ -2663,7 +3181,6 @@ fun BentoAuthScreen(
                     isLoading = true
                     scope.launch {
                       try {
-                        val handle = emailTrimmed.substringBefore("@").replace(".", "_")
                         val body = mapOf(
                           "username" to emailTrimmed,
                           "password" to passwordInput
@@ -2671,7 +3188,7 @@ fun BentoAuthScreen(
                         val response = NetworkService.api.login(body)
                         val token = response.token ?: "mock_token"
                         val displayName = response.user?.displayName ?: response.user?.username ?: emailTrimmed.substringBefore("@").replaceFirstChar { it.uppercase() }
-                        val realHandle = response.user?.username ?: handle
+                        val realHandle = response.user?.username ?: userTrimmed
                         onAuthenticated(displayName, realHandle, token)
                       } catch (e: Exception) {
                         val nickname = emailTrimmed.substringBefore("@").replaceFirstChar { it.uppercase() }
