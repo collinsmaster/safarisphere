@@ -5,7 +5,7 @@ WORKDIR /usr/src/app
 
 # Install dependencies using local backend package json files
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Copy backend files
 COPY . .

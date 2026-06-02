@@ -1519,7 +1519,7 @@ fun AICompanionTab(
       }
 
       Text(
-        "Active Explorers Directory",
+        "Explorer Directory",
         color = Color.White,
         fontWeight = FontWeight.Bold,
         fontSize = 15.sp,
