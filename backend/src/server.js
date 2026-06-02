@@ -11,6 +11,9 @@ const dbService = require('./services/dbService');
 const app = express();
 const server = http.createServer(app);
 
+// Enable trust proxy for express-rate-limit when deploying behind load balancers/reverse proxies like Koyeb
+app.set('trust proxy', 1);
+
 // Initialize Socket.IO with broad CORS settings for mobile/web clients
 const io = new Server(server, {
   cors: {
