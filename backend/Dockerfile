@@ -1,18 +1,18 @@
 FROM node:20-alpine
 
-# Create app directory
+# Create app directory inside container
 WORKDIR /usr/src/app
 
-# Install app dependencies
+# Install dependencies using local backend package json files
 COPY package*.json ./
 RUN npm ci --only=production
 
-# Bundle app source
+# Copy backend files
 COPY . .
 
-# Set dynamic port via environment and expose it
+# Set production port and expose it
 ENV PORT=8080
 EXPOSE 8080
 
-# Run production server
+# Start server
 CMD [ "npm", "start" ]

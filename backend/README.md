@@ -1,6 +1,6 @@
 # 🚀 Safari Sphere Social Backend Engine
 
-[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/collinsmaster/safarisphere&branch=main&name=safarisphere&env[NODE_ENV]=production&env[PORT]=8080&env[DATABASE_URL]=postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere&env[JWT_SECRET]=supersecretjwtpasswordkey123&env[JWT_REFRESH_SECRET]=supersecretjwtrefreshpasswordkey123&env[GEMINI_API_KEY]=)
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&repository=github.com/collinsmaster/safarisphere&branch=main&name=safarisphere&builder=docker&env[NODE_ENV]=production&env[PORT]=8080&env[DATABASE_URL]=postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere&env[JWT_SECRET]=supersecretjwtpasswordkey123&env[JWT_REFRESH_SECRET]=supersecretjwtrefreshpasswordkey123&env[GEMINI_API_KEY]=)
 
 Safari Sphere is a fresh, futuristic, community-driven social networking platform designed for real-time engagement, creativity, visual discovery, and interactive gamification. This is the production-ready Node.js + Express + PostgreSQL + Socket.IO backend repository, optimized for high performance, server-side Google Gemini AI integration, and instant deployment on **Koyeb**.
 
@@ -19,7 +19,10 @@ The system utilizes a modern, robust **Controller-Service-Repository** architect
 
 ## 🚀 Instant Deployment on Koyeb
 
-Koyeb is a developer-friendly serverless app platform. You can deploy Safari Sphere in minutes from your GitHub fork.
+### ⚠️ IMPORTANT: Why the Buildpack compilation failed and how to prevent it
+Because this repository holds both `/app` (Android code written in Kotlin/Gradle) and `/backend` (NodeJS Express code), Koyeb's default **Buildpack builder** auto-detection erroneously selects JVM & Gradle wrapper buildpacks instead of Node!
+
+To deploy successfully, you **MUST configure Koyeb to use the Dockerfile Builder**. This tells Koyeb to immediately construct the Node.js Docker container using the optimized `/Dockerfile` configuration and bypass the Android Gradle building tasks entirely.
 
 ### Step 1: Push Your Code to GitHub
 Create a fresh, public or private GitHub Repository and push the Safari Sphere code to it:
@@ -42,12 +45,16 @@ We also added a database bootstrapper utility. To initialize tables on your remo
 1. Click the **Deploy to Koyeb** button at the top of this file.
 2. Sign in or register your Koyeb account.
 3. You will be redirected to the service configuration form where all empty environment variables are pre-loaded!
-4. **Fill in the variables**:
-   - `DATABASE_URL`: Pre-loaded with your Virginia Render postgres link! Keep it or customize as needed.
+4. **Configure Builder Settings**:
+   - 🌟 **Change Builder from Buildpack to Dockerfile** (Crucial! Do not use Buildpacks).
+   - Set the **Root Directory** field to: `/` (or leave it empty/default so Koyeb uses the top-level Dockerfile, or set it to `backend` since we also added an optimized `/backend/Dockerfile` as fallback).
+5. **Fill in the variables**:
+   - `DATABASE_URL`: Preloaded with your active Render Postgres URL (`postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere`).
    - `JWT_SECRET` & `JWT_REFRESH_SECRET`: Secure session hash salts.
    - `GEMINI_API_KEY`: Input your custom Google AI Studio Key.
-5. In the **Builder Settings**, set the **Root Directory** field to `backend`.
-6. Click **Deploy**. Koyeb will compile the project and assign your custom subdomain `safarisphere.koyeb.app`!
+   - `PORT`: Set to `8080`.
+6. Set the Exposed Port to **`8080`**.
+7. Click **Deploy**. Koyeb will compile the project and assign your custom subdomain `safarisphere.koyeb.app`!
 
 ---
 

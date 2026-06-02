@@ -1,0 +1,11 @@
+# Ignore Android files, gradle caches, and gradle wrapper files to speed up Docker context
+app/
+.gradle/
+.idea/
+gradle/
+build/
+local.properties
+debug.keystore
+debug.keystore.base64
+node_modules/
+npm-debug.log

@@ -1,0 +1,32 @@
+# Koyeb Configuration File for Safari Sphere Social Backend Engine
+# This layout ensures Koyeb deploys the Node.js Express server using the Dockerfile
+# instead of trying to run Gradle buildpacks on the Android module.
+
+name: safarisphere
+services:
+  - name: safarisphere
+    type: web
+    ports:
+      - port: 8080
+        protocol: http
+    routes:
+      - path: /
+        port: 8080
+    regions:
+      - fra
+    builder: docker
+    dockerfile: Dockerfile
+    instance_type: free
+    env:
+      - key: PORT
+        value: "8080"
+      - key: NODE_ENV
+        value: "production"
+      - key: DATABASE_URL
+        value: "postgres://safari_sphere_user:70yhVu2mfzuiAzWBO1DEi5Q8VgxXZ2CI@dpg-d8fh6bl8nd3s73fqioag-a.virginia-postgres.render.com/safari_sphere"
+      - key: JWT_SECRET
+        value: "supersecretjwtpasswordkey123"
+      - key: JWT_REFRESH_SECRET
+        value: "supersecretjwtrefreshpasswordkey123"
+      - key: GEMINI_API_KEY
+        value: ""
