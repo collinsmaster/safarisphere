@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -2924,6 +2925,10 @@ fun BentoAuthScreen(
   var passwordInput by remember { mutableStateOf("") }
   var confirmPasswordInput by remember { mutableStateOf("") }
 
+  var isUsernameFocused by remember { mutableStateOf(false) }
+  var isEmailFocused by remember { mutableStateOf(false) }
+  var isPasswordFocused by remember { mutableStateOf(false) }
+
   // Signup live backend validation states
   var isUsernameValidating by remember { mutableStateOf(false) }
   var isUsernameAvailable by remember { mutableStateOf(false) }
@@ -3039,64 +3044,6 @@ fun BentoAuthScreen(
       verticalArrangement = Arrangement.spacedBy(16.dp),
       contentPadding = PaddingValues(vertical = 24.dp)
     ) {
-      // CARD 1: EXPLOER PORTAL HEADER
-      item {
-        Surface(
-          modifier = Modifier.fillMaxWidth(),
-          color = GlassyCard,
-          shape = RoundedCornerShape(24.dp),
-          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-        ) {
-          Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            Box(
-              modifier = Modifier
-                .size(72.dp)
-                .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(NeonCyan, BentoIndigo, SoftNeonMint)))
-                .padding(3.dp),
-              contentAlignment = Alignment.Center
-            ) {
-              Box(
-                modifier = Modifier
-                  .fillMaxSize()
-                  .clip(CircleShape)
-                  .background(DeepObsidian),
-                contentAlignment = Alignment.Center
-              ) {
-                Icon(
-                  imageVector = Icons.Default.Lock,
-                  contentDescription = "Lock Secure",
-                  tint = NeonCyan,
-                  modifier = Modifier.size(28.dp)
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-              text = if (isSignUp) "Synthesize Explorer Profile" else "Safari Sphere Gateway",
-              color = Color.White,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 24.sp,
-              letterSpacing = (-0.5).sp
-            )
-
-            Text(
-              text = if (isSignUp) "Initialize your secure credentials on the Pioneer Network." else "Authenticate your registered explorer handle to Enter.",
-              color = Color.Gray,
-              fontSize = 13.sp,
-              textAlign = TextAlign.Center,
-              modifier = Modifier.padding(top = 6.dp)
-            )
-          }
-        }
-      }
-
-      // CARD 2: FORM CONTENT
       item {
         Surface(
           modifier = Modifier.fillMaxWidth(),
@@ -3105,6 +3052,62 @@ fun BentoAuthScreen(
           border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
         ) {
           Column(modifier = Modifier.padding(24.dp)) {
+            // INTEGRATED PREMIUM HEADER SECTION
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(52.dp)
+                  .clip(CircleShape)
+                  .background(Brush.linearGradient(listOf(NeonCyan, BentoIndigo, SoftNeonMint)))
+                  .padding(2.5.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                Box(
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(DeepObsidian),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Icon(
+                    imageVector = if (isSignUp) Icons.Default.Person else Icons.Default.Lock,
+                    contentDescription = "Auth Icon",
+                    tint = NeonCyan,
+                    modifier = Modifier.size(22.dp)
+                  )
+                }
+              }
+              Spacer(modifier = Modifier.width(16.dp))
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = if (isSignUp) "Synthesize Profile" else "Safari Gateway",
+                  color = Color.White,
+                  fontWeight = FontWeight.ExtraBold,
+                  fontSize = 20.sp,
+                  letterSpacing = (-0.5).sp
+                )
+                Text(
+                  text = if (isSignUp) "Configure secure credentials for Pioneer." else "Sign in to enter the social sphere.",
+                  color = Color.Gray,
+                  fontSize = 12.sp
+                )
+              }
+            }
+
+            Box(
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color.White.copy(alpha = 0.08f))
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             if (!isSignUp) {
               // ================= SIGN IN LAYOUT =================
               Text(
@@ -3195,11 +3198,7 @@ fun BentoAuthScreen(
                       if (rawMessage.contains("401")) {
                         authErrorMessage = "Invalid credentials. Verify your passphrase and try again."
                       } else {
-                        // fallback local offline mode
-                        val dummyDisplay = loginCredentialInput.trim().substringBefore("@").replaceFirstChar { it.uppercase() }
-                        val dummyHandle = loginCredentialInput.trim().substringBefore("@").replace(".", "_")
-                        onAuthenticated(dummyDisplay, dummyHandle, "mock_token")
-                        android.widget.Toast.makeText(context, "Welcome Pioneer! Offline validation triggered.", android.widget.Toast.LENGTH_SHORT).show()
+                        authErrorMessage = "Connection error: Unable to contact Safari Sphere database server. Please try again."
                       }
                     } finally {
                       isLoading = false
@@ -3308,12 +3307,13 @@ fun BentoAuthScreen(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
+                  .onFocusChanged { isUsernameFocused = it.isFocused }
                   .testTag("signup_username_input"),
                 singleLine = true
               )
 
               // SMART REAL-TIME FEEDBACK FOR USERNAME
-              if (usernameInput.isNotEmpty()) {
+              if (isUsernameFocused && usernameInput.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                   modifier = Modifier.fillMaxWidth(),
@@ -3398,12 +3398,13 @@ fun BentoAuthScreen(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
+                  .onFocusChanged { isEmailFocused = it.isFocused }
                   .testTag("signup_email_input"),
                 singleLine = true
               )
 
               // SMART REAL-TIME FEEDBACK FOR EMAIL
-              if (emailInput.isNotEmpty()) {
+              if (isEmailFocused && emailInput.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                   modifier = Modifier.fillMaxWidth(),
@@ -3490,12 +3491,13 @@ fun BentoAuthScreen(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
+                  .onFocusChanged { isPasswordFocused = it.isFocused }
                   .testTag("signup_password_input"),
                 singleLine = true
               )
 
               // SMART PASSWORD RULES FEEDBACK
-              if (passwordInput.isNotEmpty()) {
+              if (isPasswordFocused && passwordInput.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Surface(
                   modifier = Modifier.fillMaxWidth(),

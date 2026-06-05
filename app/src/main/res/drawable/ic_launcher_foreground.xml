@@ -1,8 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/safari_sphere_logo_1780671160279"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Sphere/Globe Ring -->
+    <path
+        android:strokeColor="#00FAFF"
+        android:strokeWidth="4"
+        android:pathData="M 54, 26 A 28,28 0 1,1 53.9, 26" />
+
+    <!-- Globe Grid Longitude Oval 1 -->
+    <path
+        android:strokeColor="#00FAFF"
+        android:strokeWidth="2"
+        android:pathData="M 54, 26 A 15,28 0 1,1 53.9, 26" />
+
+    <!-- Globe Grid Longitude Line Center -->
+    <path
+        android:strokeColor="#00FAFF"
+        android:strokeWidth="2"
+        android:pathData="M54,26 L54,82" />
+
+    <!-- Globe Grid Equator Line -->
+    <path
+        android:strokeColor="#00FAFF"
+        android:strokeWidth="2"
+        android:pathData="M26,54 L82,54" />
+
+    <!-- Compass Pointer Center Dial Accent -->
+    <path
+        android:fillColor="#120A35"
+        android:strokeColor="#00FAFF"
+        android:strokeWidth="2"
+        android:pathData="M 54, 46 A 8,8 0 1,1 53.9, 46" />
+
+    <!-- Active Compass Needle: Top (North) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54 L59,51 L54,36 L49,51 Z" />
+
+    <!-- Active Compass Needle: Bottom (South) -->
+    <path
+        android:fillColor="#00FAFF"
+        android:pathData="M54,54 L49,57 L54,72 L59,57 Z" />
+
+    <!-- Dial Pin -->
+    <path
+        android:fillColor="#00FAFF"
+        android:pathData="M 54, 52 A 2,2 0 1,1 53.9, 52" />
+</vector>

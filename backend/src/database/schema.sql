@@ -322,8 +322,8 @@ CREATE INDEX IF NOT EXISTS idx_posts_vibe_category ON posts(vibe_category);
 CREATE INDEX IF NOT EXISTS idx_comments_post_parent ON comments(post_id, parent_id);
 
 -- Expiration indexing for stories/temp rooms
-CREATE INDEX IF NOT EXISTS idx_moments_expires_at ON moments(expires_at) WHERE expires_at > CURRENT_TIMESTAMP;
-CREATE INDEX IF NOT EXISTS idx_rooms_expires_at ON rooms(expires_at) WHERE expires_at > CURRENT_TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_moments_expires_at ON moments(expires_at);
+CREATE INDEX IF NOT EXISTS idx_rooms_expires_at ON rooms(expires_at);
 
 -- Notification lookups
 CREATE INDEX IF NOT EXISTS idx_notifications_receiver ON notifications(receiver_id, is_read, created_at DESC);
