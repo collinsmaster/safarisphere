@@ -29,8 +29,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,6 +42,7 @@ import kotlinx.coroutines.launch
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import coil.compose.AsyncImage
 
 // ==============================================================================
 // 🌟 SAFARI SPHERE MAIN ENTRYPOINT & UI ENGINE
@@ -118,6 +121,9 @@ fun SafariSphereApp() {
   var userHandle by remember { mutableStateOf(prefs.getString("user_handle", "explorer_prime") ?: "explorer_prime") }
   var userBio by remember { mutableStateOf(prefs.getString("user_bio", "A fresh pioneer in Safari Sphere!") ?: "A fresh pioneer in Safari Sphere!") }
   var userLocation by remember { mutableStateOf(prefs.getString("user_location", "Savannah Valley") ?: "Savannah Valley") }
+  var userAvatarUrl by remember { mutableStateOf(prefs.getString("user_avatar_url", null)) }
+  var userJoinDate by remember { mutableStateOf(prefs.getString("user_join_date", null)) }
+  var isFetchingProfile by remember { mutableStateOf(false) }
 
   // State Simulation / Local Fallback Store matching MongoDB / Postgres listings
   val momentsList = remember {
@@ -203,6 +209,36 @@ fun SafariSphereApp() {
   // Inject token dynamically on modification
   LaunchedEffect(authToken) {
     NetworkService.setAuthToken(authToken)
+  }
+
+  val loadUserProfile = {
+    scope.launch {
+      if (isAuthenticated) {
+        try {
+          isFetchingProfile = true
+          val profile = NetworkService.api.getProfile()
+          userNickname = profile.displayName ?: profile.username ?: userNickname
+          userHandle = profile.username ?: userHandle
+          userBio = profile.bio ?: userBio
+          userLocation = profile.locationLabel ?: userLocation
+          userAvatarUrl = profile.avatarUrl
+          userJoinDate = profile.createdAt
+          
+          prefs.edit()
+            .putString("user_nickname", userNickname)
+            .putString("user_handle", userHandle)
+            .putString("user_bio", userBio)
+            .putString("user_location", userLocation)
+            .putString("user_avatar_url", userAvatarUrl)
+            .putString("user_join_date", userJoinDate)
+            .apply()
+        } catch (e: Exception) {
+          // Log or fallback quietly
+        } finally {
+          isFetchingProfile = false
+        }
+      }
+    }
   }
 
   val loadPostsFromBackend = {
@@ -311,6 +347,7 @@ fun SafariSphereApp() {
   LaunchedEffect(isAuthenticated, authToken) {
     if (isAuthenticated) {
       loadPostsFromBackend()
+      loadUserProfile()
     }
   }
 
@@ -318,6 +355,8 @@ fun SafariSphereApp() {
     if (selectedTab == 2) {
       loadExplorers()
       loadChats()
+    } else if (selectedTab == 4) {
+      loadUserProfile()
     }
   }
 
@@ -633,6 +672,8 @@ fun SafariSphereApp() {
             handle = userHandle,
             bio = userBio,
             location = userLocation,
+            avatarUrl = userAvatarUrl,
+            joinDate = userJoinDate,
             onMoodSelected = { text, emo ->
               updateMood(text, emo)
             },
@@ -667,6 +708,8 @@ fun SafariSphereApp() {
               userHandle = "explorer_prime"
               userBio = "A fresh pioneer in Safari Sphere!"
               userLocation = "Savannah Valley"
+              userAvatarUrl = null
+              userJoinDate = null
               isAuthenticated = false
               selectedTab = 0
             }
@@ -2213,6 +2256,8 @@ fun IdentityTab(
   handle: String,
   bio: String,
   location: String,
+  avatarUrl: String?,
+  joinDate: String?,
   onMoodSelected: (String, String) -> Unit,
   onProfileUpdated: (nickname: String, bio: String, location: String) -> Unit,
   onLogOut: () -> Unit
@@ -2263,7 +2308,17 @@ fun IdentityTab(
                 .background(DeepObsidian),
               contentAlignment = Alignment.Center
             ) {
-              Text(moodEmoji, fontSize = 42.sp)
+              if (!avatarUrl.isNullOrEmpty()) {
+                AsyncImage(
+                  model = avatarUrl,
+                  contentDescription = "User Avatar",
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                )
+              } else {
+                Text(moodEmoji, fontSize = 42.sp)
+              }
             }
           }
 
@@ -2302,6 +2357,37 @@ fun IdentityTab(
             Spacer(modifier = Modifier.width(4.dp))
             Text(
               location,
+              color = Color.Gray,
+              fontSize = 11.sp
+            )
+          }
+
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 4.dp)
+          ) {
+            Icon(
+              imageVector = Icons.Default.DateRange,
+              contentDescription = "Joined Date",
+              tint = Color.Gray,
+              modifier = Modifier.size(12.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = if (!joinDate.isNullOrEmpty()) {
+                val formattedDate = try {
+                  if (joinDate.contains("T")) {
+                    joinDate.split("T")[0]
+                  } else {
+                    joinDate
+                  }
+                } catch (e: Exception) {
+                  joinDate
+                }
+                "Joined: $formattedDate"
+              } else {
+                "Joined: Early Alpha"
+              },
               color = Color.Gray,
               fontSize = 11.sp
             )
@@ -2820,14 +2906,120 @@ fun BentoAuthScreen(
   val scope = rememberCoroutineScope()
   val context = androidx.compose.ui.platform.LocalContext.current
   var isLoading by remember { mutableStateOf(false) }
-  var emailInput by remember { mutableStateOf("") }
-  var passwordInput by remember { mutableStateOf("") }
-  var nicknameInput by remember { mutableStateOf("") }
-  var usernameInput by remember { mutableStateOf("") }
-  var otpInput by remember { mutableStateOf("") }
-  var showOtpVerifyInput by remember { mutableStateOf(false) }
+
+  // Shared state
   var isSignUp by remember { mutableStateOf(false) }
   var authErrorMessage by remember { mutableStateOf("") }
+  var otpInput by remember { mutableStateOf("") }
+  var showOtpVerifyInput by remember { mutableStateOf(false) }
+
+  // Login inputs
+  var loginCredentialInput by remember { mutableStateOf("") }
+  var loginPasswordInput by remember { mutableStateOf("") }
+
+  // Signup inputs
+  var nicknameInput by remember { mutableStateOf("") }
+  var usernameInput by remember { mutableStateOf("") }
+  var emailInput by remember { mutableStateOf("") }
+  var passwordInput by remember { mutableStateOf("") }
+  var confirmPasswordInput by remember { mutableStateOf("") }
+
+  // Signup live backend validation states
+  var isUsernameValidating by remember { mutableStateOf(false) }
+  var isUsernameAvailable by remember { mutableStateOf(false) }
+  var usernameBackendError by remember { mutableStateOf<String?>(null) }
+
+  var isEmailValidating by remember { mutableStateOf(false) }
+  var isEmailAvailable by remember { mutableStateOf(false) }
+  var emailBackendError by remember { mutableStateOf<String?>(null) }
+
+  // Live rule checking: Username constraints
+  val usernameLengthOk = usernameInput.length >= 3 && usernameInput.length <= 16
+  val usernameNoSpaces = !usernameInput.contains(" ")
+  val usernameAllowedChars = usernameInput.all { it.isLetterOrDigit() || it == '_' || it == '.' }
+  val usernameNotStartWithPeriod = !usernameInput.startsWith(".")
+  val usernameNotEndWithPeriod = !usernameInput.endsWith(".")
+  val usernameNoConsecutivePeriods = !usernameInput.contains("..")
+
+  val isUsernameLocallyValid = usernameInput.isNotEmpty() &&
+      usernameLengthOk &&
+      usernameNoSpaces &&
+      usernameAllowedChars &&
+      usernameNotStartWithPeriod &&
+      usernameNotEndWithPeriod &&
+      usernameNoConsecutivePeriods
+
+  // Live rule checking: Email constraints
+  val emailContainsAt = emailInput.contains("@")
+  val emailIsValidFormat = android.util.Patterns.EMAIL_ADDRESS.matcher(emailInput).matches()
+  val isGmailcomValid = if (emailInput.contains("@gmail.")) {
+    emailInput.endsWith("@gmail.com") || (emailInput.substringAfter("@").endsWith(".com") && emailInput.contains("gmail"))
+  } else {
+    true
+  }
+  val isEmailLocallyValid = emailInput.isNotEmpty() && emailContainsAt && emailIsValidFormat && isGmailcomValid
+
+  // Live rule checking: Password constraints
+  val passLengthOk = passwordInput.length >= 6
+  val passHasLetter = passwordInput.any { it.isLetter() }
+  val passHasDigit = passwordInput.any { it.isDigit() }
+  val passHasSymbol = passwordInput.any { !it.isLetterOrDigit() }
+  val isPasswordStrong = passLengthOk && passHasLetter && passHasDigit && passHasSymbol
+
+  // Live rule checking: Confirm password
+  val isConfirmPasswordMatch = confirmPasswordInput == passwordInput
+
+  // Live database check: Username uniqueness
+  LaunchedEffect(usernameInput) {
+    if (usernameInput.isEmpty()) {
+      isUsernameAvailable = false
+      usernameBackendError = null
+      return@LaunchedEffect
+    }
+    if (!isUsernameLocallyValid) {
+      isUsernameAvailable = false
+      usernameBackendError = "Follow the username rules."
+      return@LaunchedEffect
+    }
+    delay(400)
+    isUsernameValidating = true
+    try {
+      val res = NetworkService.api.checkUsername(usernameInput.trim())
+      isUsernameAvailable = res.available
+      usernameBackendError = res.error
+    } catch (e: Exception) {
+      isUsernameAvailable = true
+      usernameBackendError = null
+    } finally {
+      isUsernameValidating = false
+    }
+  }
+
+  // Live database check: Email existence
+  LaunchedEffect(emailInput) {
+    if (emailInput.isEmpty()) {
+      isEmailAvailable = false
+      emailBackendError = null
+      return@LaunchedEffect
+    }
+    if (!isEmailLocallyValid) {
+      isEmailAvailable = false
+      emailBackendError = "Enter a valid email address structure."
+      return@LaunchedEffect
+    }
+    delay(400)
+    isEmailValidating = true
+    try {
+      val res = NetworkService.api.checkEmail(emailInput.trim().lowercase())
+      isEmailAvailable = res.available
+      emailBackendError = res.error
+    } catch (e: Exception) {
+      isEmailAvailable = true
+      emailBackendError = null
+    } finally {
+      isEmailValidating = false
+    }
+  }
 
   Box(
     modifier = Modifier
@@ -2843,11 +3035,11 @@ fun BentoAuthScreen(
     LazyColumn(
       modifier = Modifier
         .fillMaxWidth()
-        .widthIn(max = 450.dp),
+        .widthIn(max = 480.dp),
       verticalArrangement = Arrangement.spacedBy(16.dp),
       contentPadding = PaddingValues(vertical = 24.dp)
     ) {
-      // Card 1: Beautiful Cosmic Savanna Welcome Header with Gradient Ring Logo
+      // CARD 1: EXPLOER PORTAL HEADER
       item {
         Surface(
           modifier = Modifier.fillMaxWidth(),
@@ -2876,7 +3068,7 @@ fun BentoAuthScreen(
               ) {
                 Icon(
                   imageVector = Icons.Default.Lock,
-                  contentDescription = "Lock",
+                  contentDescription = "Lock Secure",
                   tint = NeonCyan,
                   modifier = Modifier.size(28.dp)
                 )
@@ -2886,7 +3078,7 @@ fun BentoAuthScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-              "Safari Sphere",
+              text = if (isSignUp) "Synthesize Explorer Profile" else "Safari Sphere Gateway",
               color = Color.White,
               fontWeight = FontWeight.ExtraBold,
               fontSize = 24.sp,
@@ -2894,7 +3086,7 @@ fun BentoAuthScreen(
             )
 
             Text(
-              "The Cyber-Savannah Portal. Authenticate your explorer credentials to join.",
+              text = if (isSignUp) "Initialize your secure credentials on the Pioneer Network." else "Authenticate your registered explorer handle to Enter.",
               color = Color.Gray,
               fontSize = 13.sp,
               textAlign = TextAlign.Center,
@@ -2904,7 +3096,7 @@ fun BentoAuthScreen(
         }
       }
 
-      // Card 2: Interactive Login / Sign Up Form Panel (With full validation)
+      // CARD 2: FORM CONTENT
       item {
         Surface(
           modifier = Modifier.fillMaxWidth(),
@@ -2913,62 +3105,158 @@ fun BentoAuthScreen(
           border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
         ) {
           Column(modifier = Modifier.padding(24.dp)) {
-            // Mode Tab Selector
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.04f))
-                .padding(4.dp),
-              horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .weight(1f)
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(if (!isSignUp) Color.White.copy(alpha = 0.1f) else Color.Transparent)
-                  .clickable {
-                    isSignUp = false
-                    authErrorMessage = ""
-                  }
-                  .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
-              ) {
-                Text(
-                  "Sign In",
-                  color = if (!isSignUp) Color.White else Color.Gray,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp
-                )
-              }
-
-              Box(
-                modifier = Modifier
-                  .weight(1f)
-                  .clip(RoundedCornerShape(8.dp))
-                  .background(if (isSignUp) Color.White.copy(alpha = 0.1f) else Color.Transparent)
-                  .clickable {
-                    isSignUp = true
-                    authErrorMessage = ""
-                  }
-                  .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
-              ) {
-                Text(
-                  "Sign Up",
-                  color = if (isSignUp) Color.White else Color.Gray,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 13.sp
-                )
-              }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Auth Nickname Input (Only show during signing up)
-            if (isSignUp) {
+            if (!isSignUp) {
+              // ================= SIGN IN LAYOUT =================
               Text(
-                "Explorer Nickname",
+                text = "Explorer Handle or Email",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+              )
+              OutlinedTextField(
+                value = loginCredentialInput,
+                onValueChange = { loginCredentialInput = it },
+                placeholder = { Text("e.g. pioneer_prime or princemaster@gmail.com", color = Color.Gray, fontSize = 13.sp) },
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedBorderColor = NeonCyan,
+                  unfocusedBorderColor = Color.DarkGray,
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("login_credential_input"),
+                singleLine = true
+              )
+
+              Spacer(modifier = Modifier.height(14.dp))
+
+              Text(
+                text = "Secure Passphrase",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+              )
+              OutlinedTextField(
+                value = loginPasswordInput,
+                onValueChange = { loginPasswordInput = it },
+                placeholder = { Text("••••••••", color = Color.Gray) },
+                visualTransformation = PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedBorderColor = NeonCyan,
+                  unfocusedBorderColor = Color.DarkGray,
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("login_password_input"),
+                singleLine = true
+              )
+
+              if (authErrorMessage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                  text = authErrorMessage,
+                  color = DangerCrimson,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold
+                )
+              }
+
+              Spacer(modifier = Modifier.height(20.dp))
+
+              Button(
+                onClick = {
+                  if (isLoading) return@Button
+                  if (loginCredentialInput.isEmpty() || loginPasswordInput.isEmpty()) {
+                    authErrorMessage = "All credentials must be populated."
+                    return@Button
+                  }
+                  authErrorMessage = ""
+                  isLoading = true
+                  scope.launch {
+                    try {
+                      val body = mapOf(
+                        "username" to loginCredentialInput.trim(),
+                        "password" to loginPasswordInput
+                      )
+                      val response = NetworkService.api.login(body)
+                      val token = response.token ?: "mock_token"
+                      val displayName = response.user?.displayName ?: response.user?.username ?: loginCredentialInput.trim().substringBefore("@")
+                      val realHandle = response.user?.username ?: loginCredentialInput.trim()
+                      onAuthenticated(displayName, realHandle, token)
+                    } catch (e: Exception) {
+                      val rawMessage = e.message ?: ""
+                      if (rawMessage.contains("401")) {
+                        authErrorMessage = "Invalid credentials. Verify your passphrase and try again."
+                      } else {
+                        // fallback local offline mode
+                        val dummyDisplay = loginCredentialInput.trim().substringBefore("@").replaceFirstChar { it.uppercase() }
+                        val dummyHandle = loginCredentialInput.trim().substringBefore("@").replace(".", "_")
+                        onAuthenticated(dummyDisplay, dummyHandle, "mock_token")
+                        android.widget.Toast.makeText(context, "Welcome Pioneer! Offline validation triggered.", android.widget.Toast.LENGTH_SHORT).show()
+                      }
+                    } finally {
+                      isLoading = false
+                    }
+                  }
+                },
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = NeonCyan,
+                  contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(48.dp)
+                  .testTag("login_submit_button")
+              ) {
+                if (isLoading) {
+                  CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
+                } else {
+                  Text("Verify Credentials & Enter", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+              }
+
+              Spacer(modifier = Modifier.height(20.dp))
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Text(
+                  text = "Don't have an account? ",
+                  color = Color.White,
+                  fontSize = 14.sp
+                )
+                Text(
+                  text = "Sign up.",
+                  color = NeonCyan,
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.Bold,
+                  style = TextStyle(textDecoration = TextDecoration.Underline),
+                  modifier = Modifier
+                    .clickable {
+                      isSignUp = true
+                      authErrorMessage = ""
+                      showOtpVerifyInput = false
+                    }
+                    .padding(vertical = 4.dp, horizontal = 2.dp)
+                )
+              }
+
+            } else {
+              // ================= SIGN UP LAYOUT =================
+
+              // 1. NICKNAME INPUT
+              Text(
+                text = "Display Name",
                 color = Color.LightGray,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -2979,21 +3267,29 @@ fun BentoAuthScreen(
                 onValueChange = { nicknameInput = it },
                 placeholder = { Text("e.g. Ranger Sam", color = Color.Gray, fontSize = 13.sp) },
                 colors = OutlinedTextFieldDefaults.colors(
-                  focusedBorderColor = NeonCyan,
-                  unfocusedBorderColor = Color.DarkGray,
+                  focusedBorderColor = if (nicknameInput.trim().length >= 2) SoftNeonMint else Color.DarkGray,
+                  unfocusedBorderColor = if (nicknameInput.trim().length >= 2) SoftNeonMint else Color.DarkGray,
                   focusedTextColor = Color.White,
                   unfocusedTextColor = Color.White
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
-                  .testTag("auth_name_input"),
+                  .testTag("signup_nickname_input"),
                 singleLine = true
               )
+
               Spacer(modifier = Modifier.height(14.dp))
 
+              // 2. SMART USERNAME INPUT WITH GLOW EFFECT
+              val usernameBorderColor = when {
+                usernameInput.isEmpty() -> Color.DarkGray
+                isUsernameLocallyValid && isUsernameAvailable -> SoftNeonMint
+                else -> DangerCrimson
+              }
+
               Text(
-                "Explorer Handle (Username)",
+                text = "Unique Username Handle",
                 color = Color.LightGray,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -3004,139 +3300,346 @@ fun BentoAuthScreen(
                 onValueChange = { usernameInput = it },
                 placeholder = { Text("e.g. ranger_sam", color = Color.Gray, fontSize = 13.sp) },
                 colors = OutlinedTextFieldDefaults.colors(
-                  focusedBorderColor = NeonCyan,
-                  unfocusedBorderColor = Color.DarkGray,
+                  focusedBorderColor = usernameBorderColor,
+                  unfocusedBorderColor = usernameBorderColor,
                   focusedTextColor = Color.White,
                   unfocusedTextColor = Color.White
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
-                  .testTag("auth_username_input"),
+                  .testTag("signup_username_input"),
                 singleLine = true
               )
+
+              // SMART REAL-TIME FEEDBACK FOR USERNAME
+              if (usernameInput.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  color = Color.White.copy(alpha = 0.02f),
+                  shape = RoundedCornerShape(12.dp),
+                  border = BorderStroke(1.dp, Color.White.copy(alpha = 0.04f))
+                ) {
+                  Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                  ) {
+                    Text(
+                      text = "Username Requirements",
+                      color = Color.LightGray,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                        ValidationChip("3 - 16 characters", usernameLengthOk)
+                        ValidationChip("Only letters, numbers, _, .", usernameAllowedChars)
+                        ValidationChip("No double dots (..)", usernameNoConsecutivePeriods)
+                      }
+                      Column(modifier = Modifier.weight(1f)) {
+                        ValidationChip("No spacing allowed", usernameNoSpaces)
+                        ValidationChip("Doesn't start with dot", usernameNotStartWithPeriod)
+                        ValidationChip("Doesn't end with dot", usernameNotEndWithPeriod)
+                      }
+                    }
+
+                    if (isUsernameLocallyValid) {
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Box(
+                        modifier = Modifier
+                          .fillMaxWidth()
+                          .height(1.dp)
+                          .background(Color.White.copy(alpha = 0.05f))
+                      )
+                      Spacer(modifier = Modifier.height(4.dp))
+                      if (isUsernameValidating) {
+                        Text("Checking availability...", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      } else if (usernameBackendError != null) {
+                        Text("✗ Taken: $usernameBackendError", color = DangerCrimson, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      } else if (isUsernameAvailable) {
+                        Text("✓ Handle is available!", color = SoftNeonMint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      }
+                    }
+                  }
+                }
+              }
+
               Spacer(modifier = Modifier.height(14.dp))
-            }
 
-            Text(
-              "Explorer Email / Handle",
-              color = Color.LightGray,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              modifier = Modifier.padding(bottom = 6.dp)
-            )
-            OutlinedTextField(
-              value = emailInput,
-              onValueChange = { emailInput = it },
-              placeholder = { Text("e.g. explorer@safari.com", color = Color.Gray, fontSize = 13.sp) },
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NeonCyan,
-                unfocusedBorderColor = Color.DarkGray,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-              ),
-              shape = RoundedCornerShape(12.dp),
-              modifier = Modifier
-                .fillMaxWidth()
-                .testTag("auth_email_input"),
-              singleLine = true
-            )
+              // 3. SMART EMAIL INPUT WITH GLOW EFFECT
+              val emailBorderColor = when {
+                emailInput.isEmpty() -> Color.DarkGray
+                isEmailLocallyValid && isEmailAvailable -> SoftNeonMint
+                else -> DangerCrimson
+              }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text(
-              "Sandbox Passphrase",
-              color = Color.LightGray,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold,
-              modifier = Modifier.padding(bottom = 6.dp)
-            )
-            OutlinedTextField(
-              value = passwordInput,
-              onValueChange = { passwordInput = it },
-              placeholder = { Text("••••••••", color = Color.Gray) },
-              visualTransformation = PasswordVisualTransformation(),
-              colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NeonCyan,
-                unfocusedBorderColor = Color.DarkGray,
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
-              ),
-              shape = RoundedCornerShape(12.dp),
-              modifier = Modifier
-                .fillMaxWidth()
-                .testTag("auth_password_input"),
-              singleLine = true
-            )
-
-            if (isSignUp && showOtpVerifyInput) {
-              Spacer(modifier = Modifier.height(14.dp))
               Text(
-                "6-Digit Verification OTP (sent to email)",
-                color = NeonCyan,
+                text = "Explorer Email Address",
+                color = Color.LightGray,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 6.dp)
               )
               OutlinedTextField(
-                value = otpInput,
-                onValueChange = { otpInput = it },
-                placeholder = { Text("e.g. 123456", color = Color.Gray, fontSize = 13.sp) },
+                value = emailInput,
+                onValueChange = { emailInput = it },
+                placeholder = { Text("e.g. sam@ranger.org", color = Color.Gray, fontSize = 13.sp) },
                 colors = OutlinedTextFieldDefaults.colors(
-                  focusedBorderColor = NeonCyan,
-                  unfocusedBorderColor = Color.DarkGray,
+                  focusedBorderColor = emailBorderColor,
+                  unfocusedBorderColor = emailBorderColor,
                   focusedTextColor = Color.White,
                   unfocusedTextColor = Color.White
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
-                  .testTag("auth_otp_input"),
+                  .testTag("signup_email_input"),
                 singleLine = true
               )
-            }
 
-            if (authErrorMessage.isNotEmpty()) {
-              Spacer(modifier = Modifier.height(10.dp))
+              // SMART REAL-TIME FEEDBACK FOR EMAIL
+              if (emailInput.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  color = Color.White.copy(alpha = 0.02f),
+                  shape = RoundedCornerShape(12.dp),
+                  border = BorderStroke(1.dp, Color.White.copy(alpha = 0.04f))
+                ) {
+                  Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                  ) {
+                    Text(
+                      text = "Email Constraints",
+                      color = Color.LightGray,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                        ValidationChip("Contains '@' symbol", emailContainsAt)
+                        ValidationChip("Valid email format structure", emailIsValidFormat)
+                      }
+                      Column(modifier = Modifier.weight(1f)) {
+                        if (emailInput.contains("@gmail.")) {
+                          ValidationChip("Gmail must end with '.com'", isGmailcomValid)
+                        } else {
+                          ValidationChip("Format validation passed", true)
+                        }
+                      }
+                    }
+
+                    if (isEmailLocallyValid) {
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Box(
+                        modifier = Modifier
+                          .fillMaxWidth()
+                          .height(1.dp)
+                          .background(Color.White.copy(alpha = 0.05f))
+                      )
+                      Spacer(modifier = Modifier.height(4.dp))
+                      if (isEmailValidating) {
+                        Text("Sifting archive registries...", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      } else if (emailBackendError != null) {
+                        Text("✗ Registered: $emailBackendError", color = DangerCrimson, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      } else if (isEmailAvailable) {
+                        Text("✓ Email address available!", color = SoftNeonMint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      }
+                    }
+                  }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(14.dp))
+
+              // 4. SMART PASSWORD INPUT WITH LIVE FEEDBACK AND STRICT GLOW STATES
+              val passwordBorderColor = when {
+                passwordInput.isEmpty() -> Color.DarkGray
+                isPasswordStrong -> SoftNeonMint
+                else -> DangerCrimson
+              }
+
               Text(
-                authErrorMessage,
-                color = Color(0xFFE71D36),
+                text = "Account Blueprint Passphrase",
+                color = Color.LightGray,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
               )
-            }
+              OutlinedTextField(
+                value = passwordInput,
+                onValueChange = { passwordInput = it },
+                placeholder = { Text("••••••••", color = Color.Gray) },
+                visualTransformation = PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedBorderColor = passwordBorderColor,
+                  unfocusedBorderColor = passwordBorderColor,
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("signup_password_input"),
+                singleLine = true
+              )
 
-            Spacer(modifier = Modifier.height(20.dp))
+              // SMART PASSWORD RULES FEEDBACK
+              if (passwordInput.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                  modifier = Modifier.fillMaxWidth(),
+                  color = Color.White.copy(alpha = 0.02f),
+                  shape = RoundedCornerShape(12.dp),
+                  border = BorderStroke(1.dp, Color.White.copy(alpha = 0.04f))
+                ) {
+                  Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                  ) {
+                    Text(
+                      text = "Passphrase Strength Blueprint",
+                      color = Color.LightGray,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                      Column(modifier = Modifier.weight(1f)) {
+                        ValidationChip("Min 6 characters", passLengthOk)
+                        ValidationChip("Includes numbers", passHasDigit)
+                      }
+                      Column(modifier = Modifier.weight(1f)) {
+                        ValidationChip("Includes letters", passHasLetter)
+                        ValidationChip("Includes symbols", passHasSymbol)
+                      }
+                    }
+                  }
+                }
+              }
 
-            Button(
-              onClick = {
-                if (isLoading) return@Button
-                val emailTrimmed = emailInput.trim()
-                val nickTrimmed = nicknameInput.trim()
-                val userTrimmed = usernameInput.trim()
+              Spacer(modifier = Modifier.height(14.dp))
 
-                if (isSignUp) {
-                  val allowed = userTrimmed.all { it.isLetterOrDigit() || it == '_' || it == '.' }
-                  if (nickTrimmed.length < 2) {
-                    authErrorMessage = "Explorer name must have at least 2 characters"
-                  } else if (userTrimmed.length < 3 || userTrimmed.length > 16) {
-                    authErrorMessage = "Handle must be between 3 and 16 characters"
-                  } else if (userTrimmed.contains(" ")) {
-                    authErrorMessage = "Handle must not contain spaces"
-                  } else if (!allowed) {
-                    authErrorMessage = "Handle only allows alphanumeric, underscores (_), and periods (.)"
-                  } else if (userTrimmed.startsWith(".")) {
-                    authErrorMessage = "Handle must not start with a period"
-                  } else if (userTrimmed.endsWith(".")) {
-                    authErrorMessage = "Handle must not end with a period"
-                  } else if (!android.util.Patterns.EMAIL_ADDRESS.matcher(emailTrimmed).matches()) {
-                    authErrorMessage = "Invalid Explorer Email address format"
-                  } else if (passwordInput.length < 6) {
-                    authErrorMessage = "Sandbox Passphrase must be at least 6 characters"
-                  } else if (showOtpVerifyInput && otpInput.trim().length != 6) {
-                    authErrorMessage = "Please enter the 6-digit verification code"
-                  } else {
-                    authErrorMessage = ""
+              // 5. SMART CONFIRM PASSWORD WITH GLOW FEEDBACK
+              val confirmPasswordBorderColor = when {
+                confirmPasswordInput.isEmpty() -> Color.DarkGray
+                isConfirmPasswordMatch -> SoftNeonMint
+                else -> DangerCrimson
+              }
+
+              Text(
+                text = "Repeat Blueprint Passphrase",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp)
+              )
+              OutlinedTextField(
+                value = confirmPasswordInput,
+                onValueChange = { confirmPasswordInput = it },
+                placeholder = { Text("••••••••", color = Color.Gray) },
+                visualTransformation = PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                  focusedBorderColor = confirmPasswordBorderColor,
+                  unfocusedBorderColor = confirmPasswordBorderColor,
+                  focusedTextColor = Color.White,
+                  unfocusedTextColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("signup_confirm_password_input"),
+                singleLine = true
+              )
+
+              if (confirmPasswordInput.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                val matchColor = if (isConfirmPasswordMatch) SoftNeonMint else DangerCrimson
+                Text(
+                  text = if (isConfirmPasswordMatch) "✓ Passphrases match!" else "✗ Passphrases do not match.",
+                  color = matchColor,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(horizontal = 4.dp)
+                )
+              }
+
+              // OTP METHOD (Only showing after standard signup accepted by server)
+              if (showOtpVerifyInput) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                  text = "6-Digit Secure Verification OTP",
+                  color = NeonCyan,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(bottom = 6.dp)
+                )
+                OutlinedTextField(
+                  value = otpInput,
+                  onValueChange = { otpInput = it },
+                  placeholder = { Text("e.g. 123456", color = Color.Gray, fontSize = 13.sp) },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("signup_otp_input"),
+                  singleLine = true
+                )
+              }
+
+              if (authErrorMessage.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                  text = authErrorMessage,
+                  color = DangerCrimson,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold
+                )
+              }
+
+              Spacer(modifier = Modifier.height(20.dp))
+
+              // ENABLE BUTTON ONLY WHEN VALID - STRICT SPAM/OTP PRESERVATION PROVISIONS
+              val isFormValidForRegister = nicknameInput.trim().length >= 2 &&
+                  isUsernameLocallyValid &&
+                  isUsernameAvailable &&
+                  isEmailLocallyValid &&
+                  isEmailAvailable &&
+                  isPasswordStrong &&
+                  isConfirmPasswordMatch
+
+              Button(
+                onClick = {
+                  if (isLoading) return@Button
+                  authErrorMessage = ""
+
+                  val nickTrimmed = nicknameInput.trim()
+                  val userTrimmed = usernameInput.trim()
+                  val emailTrimmed = emailInput.trim()
+
+                  if (showOtpVerifyInput) {
+                    if (otpInput.trim().length != 6) {
+                      authErrorMessage = "Proof of code must be exactly 6 digits."
+                      return@Button
+                    }
                     isLoading = true
                     scope.launch {
                       try {
@@ -3144,80 +3647,94 @@ fun BentoAuthScreen(
                           "email" to emailTrimmed,
                           "password" to passwordInput,
                           "username" to userTrimmed,
+                          "displayName" to nickTrimmed,
+                          "otp" to otpInput.trim()
+                        )
+                        val response = NetworkService.api.signup(body)
+                        val token = response.token ?: "mock_token"
+                        onAuthenticated(nickTrimmed, userTrimmed, token)
+                        android.widget.Toast.makeText(context, "Registration Approved! Welcome.", android.widget.Toast.LENGTH_SHORT).show()
+                      } catch (e: Exception) {
+                        authErrorMessage = "OTP Verification Failed: " + (e.localizedMessage ?: "Invalid verification code.")
+                      } finally {
+                        isLoading = false
+                      }
+                    }
+                  } else {
+                    // Send standard signup details to backend which emits the OTP
+                    isLoading = true
+                    scope.launch {
+                      try {
+                        val body = mapOf(
+                          "email" to emailTrimmed,
+                          "password" to passwordInput,
+                          "username" to userTrimmed,
                           "displayName" to nickTrimmed
                         )
-                        if (showOtpVerifyInput) {
-                          body["otp"] = otpInput.trim()
-                        }
                         val response = NetworkService.api.signup(body)
                         if (response.requiresOtp == true) {
                           showOtpVerifyInput = true
-                          authErrorMessage = response.message ?: "Verification code emitted!"
-                          // Show toast with OTP fallback if present in development
-                          // wait, does development mock response return the generated OTP code in message or custom body?
-                          // Let's print a helpful hint if they are testing locally
-                          android.widget.Toast.makeText(context, "Verification code sent to email!", android.widget.Toast.LENGTH_LONG).show()
+                          authErrorMessage = response.message ?: "Verification code emitted successfully!"
                         } else {
                           val token = response.token ?: "mock_token"
                           onAuthenticated(nickTrimmed, userTrimmed, token)
                         }
                       } catch (e: Exception) {
-                        // Fallback live mode behavior
-                        val token = "mock_token"
-                        onAuthenticated(nickTrimmed, userTrimmed, token)
-                        android.widget.Toast.makeText(context, "Welcome! Live mode fallback activated", android.widget.Toast.LENGTH_SHORT).show()
+                        authErrorMessage = "Registration sifting failed: " + (e.localizedMessage ?: "Please try again.")
                       } finally {
                         isLoading = false
                       }
                     }
                   }
+                },
+                enabled = if (showOtpVerifyInput) otpInput.trim().length == 6 else isFormValidForRegister,
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = NeonCyan,
+                  contentColor = Color.Black,
+                  disabledContainerColor = NeonCyan.copy(alpha = 0.15f),
+                  disabledContentColor = Color.White.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(48.dp)
+                  .testTag("signup_submit_button")
+              ) {
+                if (isLoading) {
+                  CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
                 } else {
-                  if (!android.util.Patterns.EMAIL_ADDRESS.matcher(emailTrimmed).matches()) {
-                    authErrorMessage = "Invalid Explorer Email address format"
-                  } else if (passwordInput.length < 6) {
-                    authErrorMessage = "Invalid Passphrase. Must be >= 6 characters."
-                  } else {
-                    authErrorMessage = ""
-                    isLoading = true
-                    scope.launch {
-                      try {
-                        val body = mapOf(
-                          "username" to emailTrimmed,
-                          "password" to passwordInput
-                        )
-                        val response = NetworkService.api.login(body)
-                        val token = response.token ?: "mock_token"
-                        val displayName = response.user?.displayName ?: response.user?.username ?: emailTrimmed.substringBefore("@").replaceFirstChar { it.uppercase() }
-                        val realHandle = response.user?.username ?: userTrimmed
-                        onAuthenticated(displayName, realHandle, token)
-                      } catch (e: Exception) {
-                        val nickname = emailTrimmed.substringBefore("@").replaceFirstChar { it.uppercase() }
-                        val handle = emailTrimmed.substringBefore("@").replace(".", "_")
-                        onAuthenticated(nickname, handle, "mock_token")
-                        android.widget.Toast.makeText(context, "Welcome! Live mode fallback", android.widget.Toast.LENGTH_SHORT).show()
-                      } finally {
-                        isLoading = false
-                      }
-                    }
-                  }
+                  Text(
+                    text = if (showOtpVerifyInput) "Submit Verification Code" else "Synthesize Explorer Profile",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                  )
                 }
-              },
-              colors = ButtonDefaults.buttonColors(
-                containerColor = NeonCyan,
-                contentColor = Color.Black
-              ),
-              shape = RoundedCornerShape(12.dp),
-              modifier = Modifier
-                .fillMaxWidth()
-                .testTag("auth_submit_button")
-            ) {
-              if (isLoading) {
-                CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
-              } else {
+              }
+
+              Spacer(modifier = Modifier.height(20.dp))
+
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
                 Text(
-                  if (isSignUp) "Register Explorer Blueprint" else "Verify Passphrase & Enter",
-                  fontWeight = FontWeight.Bold,
+                  text = "Already have an account? ",
+                  color = Color.White,
                   fontSize = 14.sp
+                )
+                Text(
+                  text = "Login.",
+                  color = NeonCyan,
+                  fontSize = 14.sp,
+                  fontWeight = FontWeight.Bold,
+                  style = TextStyle(textDecoration = TextDecoration.Underline),
+                  modifier = Modifier
+                    .clickable {
+                      isSignUp = false
+                      authErrorMessage = ""
+                    }
+                    .padding(vertical = 4.dp, horizontal = 2.dp)
                 )
               }
             }
@@ -3225,7 +3742,7 @@ fun BentoAuthScreen(
         }
       }
 
-      // Card 3: Quantum Secure lock Banner
+      // CARD 3: QUANTUM SECURITY NOTICE
       item {
         Surface(
           modifier = Modifier.fillMaxWidth(),
@@ -3240,12 +3757,12 @@ fun BentoAuthScreen(
           ) {
             Icon(
               imageVector = Icons.Default.CheckCircle,
-              contentDescription = "Verified Seal",
+              contentDescription = "Verified Status",
               tint = SoftNeonMint,
               modifier = Modifier.size(18.dp)
             )
             Text(
-              "Quantum-decentralized secure connection enabled. Your credentials, posts, and whisper networks are fully encrypted.",
+              "Safari Sphere Quantum decentralised core. Authentications, assets, and communications are secured via dual-layer client-server cryptographic encryption protocols.",
               color = Color.Gray,
               fontSize = 11.sp,
               lineHeight = 15.sp
@@ -3254,5 +3771,35 @@ fun BentoAuthScreen(
         }
       }
     }
+  }
+}
+
+@Composable
+fun ValidationChip(
+  label: String,
+  isValid: Boolean
+) {
+  val textColor = if (isValid) SoftNeonMint else Color.Gray
+  val icon = if (isValid) "✓" else "•"
+
+  Row(
+    modifier = Modifier
+      .padding(vertical = 1.dp)
+      .fillMaxWidth(),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(4.dp)
+  ) {
+    Text(
+      text = icon,
+      color = textColor,
+      fontSize = 11.sp,
+      fontWeight = FontWeight.Bold
+    )
+    Text(
+      text = label,
+      color = textColor,
+      fontSize = 11.sp,
+      lineHeight = 12.sp
+    )
   }
 }

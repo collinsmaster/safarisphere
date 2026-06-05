@@ -29,6 +29,10 @@ To deploy successfully, you **MUST configure Koyeb to use the Dockerfile Builder
    - `JWT_SECRET` & `JWT_REFRESH_SECRET`: Pre-loaded with secure authorization salt hash strings.
    - `GEMINI_API_KEY`: Input your custom Google AI Studio Key.
    - `PORT`: Set to `8080`.
+    - `EMAILJS_SERVICE_ID`: Your EmailJS Service ID.
+    - `EMAILJS_TEMPLATE_ID`: Your EmailJS Template ID.
+    - `EMAILJS_PUBLIC_KEY`: Your EmailJS Public Key.
+    - `EMAILJS_PRIVATE_KEY`: Your EmailJS Private Key (accessToken).
 6. Set the Exposed Port to **`8080`**.
 7. Click **Deploy**! Koyeb will build your serverless Node container flawlessly and scale it live at **`safarisphere.koyeb.app`**.
 

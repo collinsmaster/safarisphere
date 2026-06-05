@@ -1,18 +1,80 @@
 const twilio = require('twilio');
+const https = require('https');
 
 // Environment variables to be set in Koyeb settings
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const serviceId = process.env.VERIFICATION_SERVICE_ID || 'verification_eahp6k8';
 
-// In-memory store for OTP codes when Twilio is not fully configured (fallback development mode)
+// EmailJS credentials from environment
+const emailjsServiceId = process.env.EMAILJS_SERVICE_ID || process.env.SERVICE_ID;
+const emailjsTemplateId = process.env.EMAILJS_TEMPLATE_ID || process.env.TEMPLATE_ID;
+const emailjsPublicKey = process.env.EMAILJS_PUBLIC_KEY || process.env.PUBLIC_KEY;
+const emailjsPrivateKey = process.env.EMAILJS_PRIVATE_KEY || process.env.PRIVATE_KEY;
+
+// In-memory store for OTP codes when Twilio/EmailJS is not fully configured (fallback development mode)
 const fallbackOtpStore = {};
 
 const isTwilioConfigured = !!(accountSid && authToken && serviceId);
+const isEmailJSConfigured = !!(emailjsServiceId && emailjsTemplateId && emailjsPublicKey && emailjsPrivateKey);
 
-console.log(`[OTP Service] Twilio configure status: ${isTwilioConfigured ? 'LIVE (Real Twilio Verify)' : 'FALLBACK (Local Mock OTP)'}`);
+console.log(`[OTP Service] Twilio configure status: ${isTwilioConfigured ? 'LIVE (Real Twilio Verify)' : 'NOT CONFIGURED'}`);
+console.log(`[OTP Service] EmailJS configure status: ${isEmailJSConfigured ? 'LIVE (Real EmailJS)' : 'NOT CONFIGURED'}`);
+
 if (isTwilioConfigured) {
   console.log(`[OTP Service] Utilizing Verify Service ID: ${serviceId}`);
+}
+
+/**
+ * Helper to make robust HTTP request to EmailJS REST API
+ */
+function sendEmailJSRecord(serviceId, templateId, publicKey, privateKey, destination, otpCode) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({
+      service_id: serviceId,
+      template_id: templateId,
+      user_id: publicKey,
+      accessToken: privateKey,
+      template_params: {
+        to_email: destination,
+        email: destination,
+        otp_code: otpCode,
+        otp: otpCode,
+        code: otpCode,
+        message: `Your Safari Sphere verification OTP is: ${otpCode}`
+      }
+    });
+
+    const options = {
+      hostname: 'api.emailjs.com',
+      port: 443,
+      path: '/api/v1.0/email/send',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data);
+        } else {
+          reject(new Error(`Status ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      reject(e);
+    });
+
+    req.write(postData);
+    req.end();
+  });
 }
 
 /**
@@ -23,6 +85,33 @@ if (isTwilioConfigured) {
 async function sendOTP(destination) {
   const isEmail = destination.includes('@');
   const channel = isEmail ? 'email' : 'sms';
+
+  // Try EmailJS first for Email destinations if configured
+  if (isEmail && isEmailJSConfigured) {
+    try {
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      fallbackOtpStore[destination] = otpCode;
+
+      console.log(`[OTP Service] Sending EmailJS OTP code to ${destination}...`);
+      await sendEmailJSRecord(
+        emailjsServiceId,
+        emailjsTemplateId,
+        emailjsPublicKey,
+        emailjsPrivateKey,
+        destination,
+        otpCode
+      );
+
+      console.log(`[OTP Service] EmailJS OTP dispatched successfully to ${destination}`);
+      return { 
+        success: true, 
+        message: `Verification code successfully sent via EmailJS!`, 
+        channel 
+      };
+    } catch (err) {
+      console.error('[OTP Service] EmailJS Error sending verification. Falling back:', err.message);
+    }
+  }
 
   if (isTwilioConfigured) {
     try {

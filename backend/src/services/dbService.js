@@ -9,9 +9,9 @@ if (!useMock) {
   try {
     const config = {
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DB_SSL === 'true' || process.env.DATABASE_URL.includes('sslmode=require') ? {
+      ssl: {
         rejectUnauthorized: false
-      } : false
+      }
     };
 
     pool = new Pool(config);

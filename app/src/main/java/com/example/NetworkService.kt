@@ -117,18 +117,53 @@ data class CreateRoomRequest(
   val theme: String
 )
 
+data class BackendUserProfile(
+  @Json(name = "user_id") val userId: String,
+  @Json(name = "display_name") val displayName: String?,
+  val bio: String?,
+  @Json(name = "avatar_url") val avatarUrl: String?,
+  @Json(name = "cover_url") val coverUrl: String? = null,
+  @Json(name = "location_label") val locationLabel: String? = null,
+  val website: String? = null,
+  @Json(name = "mood_state") val moodState: String? = null,
+  @Json(name = "mood_emoji") val moodEmoji: String? = null,
+  @Json(name = "profile_animation_setting") val profileAnimationSetting: String? = null,
+  val xp: Int? = null,
+  @Json(name = "streak_count") val streakCount: Int? = null,
+  @Json(name = "created_at") val createdAt: String? = null,
+  val email: String? = null,
+  val username: String? = null
+)
+
+data class CheckAvailabilityResponse(
+  val available: Boolean,
+  val error: String? = null
+)
+
 interface SafariSphereApi {
+  @GET("auth/check-username")
+  suspend fun checkUsername(@Query("username") username: String): CheckAvailabilityResponse
+
+  @GET("auth/check-email")
+  suspend fun checkEmail(@Query("email") email: String): CheckAvailabilityResponse
+
   @POST("auth/signup")
   suspend fun signup(@Body body: Map<String, String>): AuthResponse
 
   @POST("auth/login")
   suspend fun login(@Body body: Map<String, String>): AuthResponse
 
+  @GET("auth/profile")
+  suspend fun getProfile(): BackendUserProfile
+
   @GET("auth/explorers")
   suspend fun getExplorers(): List<BackendExplorer>
 
   @POST("auth/profile/edit")
-  suspend fun editProfile(@Body body: Map<String, String>): Map<String, Any>
+  suspend fun editProfile(@Body body: Map<String, String>): AuthResponse
+
+  @POST("auth/account/delete")
+  suspend fun deleteAccount(): Map<String, Any>
 
   @GET("posts")
   suspend fun getPosts(@Query("category") category: String? = null): List<BackendPost>
