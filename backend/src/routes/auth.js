@@ -265,30 +265,7 @@ router.post('/login', async (req, res) => {
       const store = dbService.getMockStore();
       user = store.users.find(u => u.username === username || u.email === username);
       if (!user) {
-        // Fallback or seed a fast tester account so they can play inside the mobile emulator instantly!
-        user = {
-          id: 'u_tester',
-          username: 'savannah_lion',
-          email: 'lion@sphere.io',
-          password_hash: await bcrypt.hash('password123', 10),
-          role: 'user'
-        };
-        profile = {
-          user_id: 'u_tester',
-          display_name: 'Savannah Lion 🦁',
-          bio: 'Roaming the cosmic savannas in search of tech gold.',
-          avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
-          cover_url: '',
-          location_label: 'Delta Sector',
-          website: 'https://safarisphere.app',
-          mood_state: 'Vibing',
-          mood_emoji: '🦁',
-          profile_animation_setting: 'ripple',
-          xp: 450,
-          streak_count: 5
-        };
-        store.users.push(user);
-        store.profiles[user.id] = profile;
+        return res.status(401).json({ error: 'Incorrect username/email or password.' });
       } else {
         profile = store.profiles[user.id];
       }

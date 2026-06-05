@@ -44,9 +44,33 @@ if (!useMock) {
 }
 
 // In-Memory Database Store for Mock Mode
+const bcrypt = require('bcryptjs');
 const mockStore = {
-  users: [],
-  profiles: {},
+  users: [
+    {
+      id: 'u_tester',
+      username: 'savannah_lion',
+      email: 'lion@sphere.io',
+      password_hash: bcrypt.hashSync('password123', 10),
+      role: 'user'
+    }
+  ],
+  profiles: {
+    'u_tester': {
+      user_id: 'u_tester',
+      display_name: 'Savannah Lion 🦁',
+      bio: 'Roaming the cosmic savannas in search of tech gold.',
+      avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80',
+      cover_url: '',
+      location_label: 'Delta Sector',
+      website: 'https://safarisphere.app',
+      mood_state: 'Vibing',
+      mood_emoji: '🦁',
+      profile_animation_setting: 'ripple',
+      xp: 450,
+      streak_count: 5
+    }
+  },
   posts: [],
   comments: {},
   rooms: [],

@@ -42,7 +42,8 @@ data class BackendPost(
   @Json(name = "created_at") val createdAt: String? = null,
   @Json(name = "display_name") val displayName: String? = null,
   val username: String? = null,
-  @Json(name = "avatar_url") val avatarUrl: String? = null
+  @Json(name = "avatar_url") val avatarUrl: String? = null,
+  @Json(name = "has_liked") val hasLiked: Boolean? = null
 )
 
 data class CreatePostRequest(

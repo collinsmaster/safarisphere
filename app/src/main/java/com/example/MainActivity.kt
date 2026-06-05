@@ -43,6 +43,9 @@ import kotlinx.coroutines.launch
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import coil.compose.AsyncImage
 
 // ==============================================================================
@@ -138,11 +141,7 @@ fun SafariSphereApp() {
   }
 
   val postsList = remember {
-    mutableStateListOf(
-      MobilePost("p1", "Safari Explorer", "explorer_prime", "", "Spotted a family of cheetahs resting beneath a great baobab tree today. The wild cosmic energy is unmatched! 🐆 #savannah", "Adventurer", 45, false, "3m ago"),
-      MobilePost("p2", "Sienna Dusk", "sienna_d", "", "Listening to celestial tribal drums loop live in Sector-B Vybe Room. Ambient synth magic. 🥁🌾", "Acoustics", 128, true, "15m ago"),
-      MobilePost("p3", "Nova Quest", "quest_nova", "", "Completed the 'Savannah Pioneer' digital achievement! Earned 500 XP points. Next stop is the daily streak leaderboards! 🏆✨", "Gamification", 19, false, "32m ago")
-    )
+    mutableStateListOf<MobilePost>()
   }
 
   val roomsList = remember {
@@ -246,23 +245,21 @@ fun SafariSphereApp() {
     scope.launch {
       try {
         val backendPosts = NetworkService.api.getPosts()
-        if (backendPosts.isNotEmpty()) {
-          postsList.clear()
-          backendPosts.forEach { bp ->
-            postsList.add(
-              MobilePost(
-                id = bp.id,
-                author = bp.displayName ?: bp.username ?: "Anonymous Pioneer",
-                username = bp.username ?: "anonymous_user",
-                avatarUrl = bp.avatarUrl ?: "",
-                content = bp.content,
-                vibeCategory = bp.vibeCategory ?: "Adventurer",
-                likes = bp.likesCount ?: 0,
-                hasLiked = false,
-                created = "Just now"
-              )
+        postsList.clear()
+        backendPosts.forEach { bp ->
+          postsList.add(
+            MobilePost(
+              id = bp.id,
+              author = bp.displayName ?: bp.username ?: "Anonymous Pioneer",
+              username = bp.username ?: "anonymous_user",
+              avatarUrl = bp.avatarUrl ?: "",
+              content = bp.content,
+              vibeCategory = bp.vibeCategory ?: "Adventurer",
+              likes = bp.likesCount ?: 0,
+              hasLiked = bp.hasLiked ?: false,
+              created = "Just now"
             )
-          }
+          )
         }
       } catch (e: Exception) {
         // Fallback or quiet keep existing
@@ -2928,6 +2925,7 @@ fun BentoAuthScreen(
   var isUsernameFocused by remember { mutableStateOf(false) }
   var isEmailFocused by remember { mutableStateOf(false) }
   var isPasswordFocused by remember { mutableStateOf(false) }
+  var isConfirmPasswordFocused by remember { mutableStateOf(false) }
 
   // Signup live backend validation states
   var isUsernameValidating by remember { mutableStateOf(false) }
@@ -3252,8 +3250,301 @@ fun BentoAuthScreen(
 
             } else {
               // ================= SIGN UP LAYOUT =================
+              if (showOtpVerifyInput) {
+                // DEDICATED PRESTIGE VERIFICATION SCREEN
+                Text(
+                  text = "Quantum Node Authenticator",
+                  color = NeonCyan,
+                  fontSize = 11.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(bottom = 4.dp)
+                )
+                Text(
+                  text = "Enter Verification Code",
+                  color = Color.White,
+                  fontSize = 22.sp,
+                  fontWeight = FontWeight.ExtraBold,
+                  letterSpacing = (-0.5).sp,
+                  modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                // Show the email destination beautifully
+                Surface(
+                  modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                  color = Color.White.copy(alpha = 0.04f),
+                  shape = RoundedCornerShape(16.dp),
+                  border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                ) {
+                  Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Email,
+                      contentDescription = "Destination Email",
+                      tint = NeonCyan,
+                      modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                      Text(
+                        text = "We sent a 6-digit cosmic proof to:",
+                        color = Color.LightGray,
+                        fontSize = 11.sp
+                      )
+                      Text(
+                        text = emailInput.trim(),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                      )
+                    }
+                  }
+                }
 
-              // 1. NICKNAME INPUT
+                // OTP Countdown state tracking
+                var resendCountdown by remember { mutableIntStateOf(40) }
+                LaunchedEffect(showOtpVerifyInput) {
+                  resendCountdown = 40
+                }
+                LaunchedEffect(showOtpVerifyInput, resendCountdown) {
+                  if (showOtpVerifyInput && resendCountdown > 0) {
+                    delay(1000L)
+                    resendCountdown -= 1
+                  }
+                }
+
+                // Input Guidance Banner
+                Text(
+                  text = "Type the digits below to establish full user identity.",
+                  color = Color.Gray,
+                  fontSize = 12.sp,
+                  modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // Beautiful, custom Slot-Based 6-digit OTP Field
+                // A hidden BasicTextField overlays a row of 6 gorgeous modern cards!
+                Box(
+                  modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                  contentAlignment = Alignment.Center
+                ) {
+                  BasicTextField(
+                    value = otpInput,
+                    onValueChange = { inputVal ->
+                      if (inputVal.length <= 6 && inputVal.all { it.isDigit() }) {
+                        otpInput = inputVal
+                      }
+                    },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = TextStyle(color = Color.Transparent), // hide text inside the main input
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(58.dp)
+                      .testTag("signup_otp_input"),
+                    decorationBox = {
+                      Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                      ) {
+                        repeat(6) { index ->
+                          val char = otpInput.getOrNull(index)?.toString() ?: ""
+                          val isFocusedSlot = otpInput.length == index
+                          val hasChar = char.isNotEmpty()
+                          val borderStrokeColor = when {
+                            isFocusedSlot -> NeonCyan
+                            hasChar -> SoftNeonMint
+                            else -> Color.White.copy(alpha = 0.12f)
+                          }
+                          val backgroundBoxColor = when {
+                            isFocusedSlot -> NeonCyan.copy(alpha = 0.08f)
+                            hasChar -> SoftNeonMint.copy(alpha = 0.04f)
+                            else -> Color.White.copy(alpha = 0.02f)
+                          }
+
+                          Box(
+                            modifier = Modifier
+                              .weight(1f)
+                              .height(54.dp)
+                              .clip(RoundedCornerShape(12.dp))
+                              .background(backgroundBoxColor)
+                              .border(
+                                width = if (isFocusedSlot) 2.dp else 1.dp,
+                                color = borderStrokeColor,
+                                shape = RoundedCornerShape(12.dp)
+                              ),
+                            contentAlignment = Alignment.Center
+                          ) {
+                            if (isFocusedSlot) {
+                              Box(
+                                modifier = Modifier
+                                  .width(2.dp)
+                                  .height(18.dp)
+                                  .background(NeonCyan)
+                              )
+                            } else {
+                              Text(
+                                text = char,
+                                color = if (hasChar) Color.White else Color.Gray.copy(alpha = 0.4f),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                              )
+                            }
+                          }
+                        }
+                      }
+                    }
+                  )
+                }
+
+                // Error message
+                if (authErrorMessage.isNotEmpty()) {
+                  Text(
+                    text = authErrorMessage,
+                    color = DangerCrimson,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                  )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Verify Button
+                val isOtpLengthCompleted = otpInput.trim().length == 6
+                Button(
+                  onClick = {
+                    if (isLoading || !isOtpLengthCompleted) return@Button
+                    authErrorMessage = ""
+                    isLoading = true
+                    scope.launch {
+                      try {
+                        val body = mutableMapOf(
+                          "email" to emailInput.trim(),
+                          "password" to passwordInput,
+                          "username" to usernameInput.trim(),
+                          "displayName" to nicknameInput.trim(),
+                          "otp" to otpInput.trim()
+                        )
+                        val response = NetworkService.api.signup(body)
+                        val token = response.token ?: "mock_token"
+                        onAuthenticated(nicknameInput.trim(), usernameInput.trim(), token)
+                        android.widget.Toast.makeText(context, "Identity Verified! Welcome to the sphere.", android.widget.Toast.LENGTH_SHORT).show()
+                      } catch (e: Exception) {
+                        authErrorMessage = "Verification Failed: " + (e.localizedMessage ?: "Invalid verification code.")
+                      } finally {
+                        isLoading = false
+                      }
+                    }
+                  },
+                  enabled = isOtpLengthCompleted && !isLoading,
+                  colors = ButtonDefaults.buttonColors(
+                    containerColor = SoftNeonMint,
+                    contentColor = Color.Black,
+                    disabledContainerColor = SoftNeonMint.copy(alpha = 0.15f),
+                    disabledContentColor = Color.White.copy(alpha = 0.3f)
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("signup_otp_verify_button")
+                ) {
+                  if (isLoading) {
+                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
+                  } else {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.Center
+                    ) {
+                      Icon(imageVector = Icons.Default.Check, contentDescription = "Verify", modifier = Modifier.size(18.dp))
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text("Verify Cosmic Identity", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Resend Code Trigger with Countdown Helper
+                Row(
+                  modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  if (resendCountdown > 0) {
+                    Text(
+                      text = "Resend code in ${resendCountdown}s",
+                      color = Color.Gray,
+                      fontSize = 12.sp
+                    )
+                  } else {
+                    Text(
+                      text = "Did not receive code?",
+                      color = Color.LightGray,
+                      fontSize = 12.sp
+                    )
+                    Text(
+                      text = "Resend Code",
+                      color = NeonCyan,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      style = TextStyle(textDecoration = TextDecoration.Underline),
+                      modifier = Modifier.clickable {
+                        if (isLoading) return@clickable
+                        isLoading = true
+                        authErrorMessage = ""
+                        scope.launch {
+                          try {
+                            val body = mapOf(
+                              "email" to emailInput.trim(),
+                              "password" to passwordInput,
+                              "username" to usernameInput.trim(),
+                              "displayName" to nicknameInput.trim()
+                            )
+                            val response = NetworkService.api.signup(body)
+                            resendCountdown = 40
+                            otpInput = ""
+                            authErrorMessage = response.message ?: "A new validation code was dispatched."
+                          } catch (e: Exception) {
+                            authErrorMessage = "Dispatch failed: " + (e.localizedMessage ?: "Try again.")
+                          } finally {
+                            isLoading = false
+                          }
+                        }
+                      }
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Incorrect Email / Go Back Button
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.Center,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back icon",
+                    tint = NeonCyan,
+                    modifier = Modifier.size(14.dp)
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(
+                    text = "Incorrect details? Change details",
+                    color = NeonCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = TextStyle(textDecoration = TextDecoration.Underline),
+                    modifier = Modifier.clickable {
+                      showOtpVerifyInput = false
+                      authErrorMessage = ""
+                    }
+                  )
+                }
+              } else {
+                // 1. NICKNAME INPUT
               Text(
                 text = "Display Name",
                 color = Color.LightGray,
@@ -3563,11 +3854,12 @@ fun BentoAuthScreen(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
+                  .onFocusChanged { isConfirmPasswordFocused = it.isFocused }
                   .testTag("signup_confirm_password_input"),
                 singleLine = true
               )
 
-              if (confirmPasswordInput.isNotEmpty()) {
+              if (isConfirmPasswordFocused && confirmPasswordInput.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 val matchColor = if (isConfirmPasswordMatch) SoftNeonMint else DangerCrimson
                 Text(
@@ -3576,34 +3868,6 @@ fun BentoAuthScreen(
                   fontSize = 11.sp,
                   fontWeight = FontWeight.Bold,
                   modifier = Modifier.padding(horizontal = 4.dp)
-                )
-              }
-
-              // OTP METHOD (Only showing after standard signup accepted by server)
-              if (showOtpVerifyInput) {
-                Spacer(modifier = Modifier.height(14.dp))
-                Text(
-                  text = "6-Digit Secure Verification OTP",
-                  color = NeonCyan,
-                  fontSize = 11.sp,
-                  fontWeight = FontWeight.Bold,
-                  modifier = Modifier.padding(bottom = 6.dp)
-                )
-                OutlinedTextField(
-                  value = otpInput,
-                  onValueChange = { otpInput = it },
-                  placeholder = { Text("e.g. 123456", color = Color.Gray, fontSize = 13.sp) },
-                  colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonCyan,
-                    unfocusedBorderColor = Color.DarkGray,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                  ),
-                  shape = RoundedCornerShape(12.dp),
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("signup_otp_input"),
-                  singleLine = true
                 )
               }
 
@@ -3637,59 +3901,32 @@ fun BentoAuthScreen(
                   val userTrimmed = usernameInput.trim()
                   val emailTrimmed = emailInput.trim()
 
-                  if (showOtpVerifyInput) {
-                    if (otpInput.trim().length != 6) {
-                      authErrorMessage = "Proof of code must be exactly 6 digits."
-                      return@Button
-                    }
-                    isLoading = true
-                    scope.launch {
-                      try {
-                        val body = mutableMapOf(
-                          "email" to emailTrimmed,
-                          "password" to passwordInput,
-                          "username" to userTrimmed,
-                          "displayName" to nickTrimmed,
-                          "otp" to otpInput.trim()
-                        )
-                        val response = NetworkService.api.signup(body)
+                  // Send standard signup details to backend which emits the OTP
+                  isLoading = true
+                  scope.launch {
+                    try {
+                      val body = mapOf(
+                        "email" to emailTrimmed,
+                        "password" to passwordInput,
+                        "username" to userTrimmed,
+                        "displayName" to nickTrimmed
+                      )
+                      val response = NetworkService.api.signup(body)
+                      if (response.requiresOtp == true) {
+                        showOtpVerifyInput = true
+                        authErrorMessage = response.message ?: "Verification code emitted successfully!"
+                      } else {
                         val token = response.token ?: "mock_token"
                         onAuthenticated(nickTrimmed, userTrimmed, token)
-                        android.widget.Toast.makeText(context, "Registration Approved! Welcome.", android.widget.Toast.LENGTH_SHORT).show()
-                      } catch (e: Exception) {
-                        authErrorMessage = "OTP Verification Failed: " + (e.localizedMessage ?: "Invalid verification code.")
-                      } finally {
-                        isLoading = false
                       }
-                    }
-                  } else {
-                    // Send standard signup details to backend which emits the OTP
-                    isLoading = true
-                    scope.launch {
-                      try {
-                        val body = mapOf(
-                          "email" to emailTrimmed,
-                          "password" to passwordInput,
-                          "username" to userTrimmed,
-                          "displayName" to nickTrimmed
-                        )
-                        val response = NetworkService.api.signup(body)
-                        if (response.requiresOtp == true) {
-                          showOtpVerifyInput = true
-                          authErrorMessage = response.message ?: "Verification code emitted successfully!"
-                        } else {
-                          val token = response.token ?: "mock_token"
-                          onAuthenticated(nickTrimmed, userTrimmed, token)
-                        }
-                      } catch (e: Exception) {
-                        authErrorMessage = "Registration sifting failed: " + (e.localizedMessage ?: "Please try again.")
-                      } finally {
-                        isLoading = false
-                      }
+                    } catch (e: Exception) {
+                      authErrorMessage = "Registration sifting failed: " + (e.localizedMessage ?: "Please try again.")
+                    } finally {
+                      isLoading = false
                     }
                   }
                 },
-                enabled = if (showOtpVerifyInput) otpInput.trim().length == 6 else isFormValidForRegister,
+                enabled = isFormValidForRegister && !isLoading,
                 colors = ButtonDefaults.buttonColors(
                   containerColor = NeonCyan,
                   contentColor = Color.Black,
@@ -3706,7 +3943,7 @@ fun BentoAuthScreen(
                   CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
                 } else {
                   Text(
-                    text = if (showOtpVerifyInput) "Submit Verification Code" else "Synthesize Explorer Profile",
+                    text = "Synthesize Explorer Profile",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                   )
@@ -3738,6 +3975,7 @@ fun BentoAuthScreen(
                     }
                     .padding(vertical = 4.dp, horizontal = 2.dp)
                 )
+              }
               }
             }
           }

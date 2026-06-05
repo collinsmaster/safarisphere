@@ -92,7 +92,7 @@ async function sendOTP(destination) {
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       fallbackOtpStore[destination] = otpCode;
 
-      console.log(`[OTP Service] Sending EmailJS OTP code to ${destination}...`);
+      console.log(`[OTP Service] Sending EmailJS OTP code ${otpCode} to ${destination}...`);
       await sendEmailJSRecord(
         emailjsServiceId,
         emailjsTemplateId,
@@ -105,8 +105,9 @@ async function sendOTP(destination) {
       console.log(`[OTP Service] EmailJS OTP dispatched successfully to ${destination}`);
       return { 
         success: true, 
-        message: `Verification code successfully sent via EmailJS!`, 
-        channel 
+        message: `Verification code successfully sent via email!`, 
+        channel,
+        debugOtp: otpCode
       };
     } catch (err) {
       console.error('[OTP Service] EmailJS Error sending verification. Falling back:', err.message);

@@ -5,21 +5,21 @@ const aiService = require('../services/aiService');
 const authMiddleware = require('../middleware/auth');
 
 // 1. FETCH ALL FEED POSTS WITH DISCOVERY FILTERING
-router.get('/', async (req, res) => {
-  const { category, hashtag, location } = req.query;
+router.get('/', authMiddleware, async (req, res) => {
+  const { category, hashtag } = req.query;
 
   try {
     let posts = [];
 
     if (!dbService.isMock) {
-      let queryText = 'SELECT p.*, pr.display_name, pr.avatar_url, u.username FROM posts p JOIN profiles pr ON p.author_id = pr.user_id JOIN users u ON p.author_id = u.id';
-      const params = [];
+      let queryText = 'SELECT p.*, pr.display_name, pr.avatar_url, u.username, EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked FROM posts p JOIN profiles pr ON p.author_id = pr.user_id JOIN users u ON p.author_id = u.id';
+      const params = [req.user.id];
 
       if (category) {
-        queryText += ' WHERE p.vibe_category = $1';
+        queryText += ' WHERE p.vibe_category = $2';
         params.push(category);
       } else if (hashtag) {
-        queryText += ' WHERE p.content ILIKE $1';
+        queryText += ' WHERE p.content ILIKE $2';
         params.push(`%#${hashtag}%`);
       }
 
@@ -28,14 +28,22 @@ router.get('/', async (req, res) => {
       posts = feedRes.rows;
     } else {
       const store = dbService.getMockStore();
-      posts = [...store.posts];
+      let rawPosts = [...store.posts];
 
       if (category) {
-        posts = posts.filter(p => p.vibe_category?.toLowerCase() === category.toLowerCase());
+        rawPosts = rawPosts.filter(p => p.vibe_category?.toLowerCase() === category.toLowerCase());
       }
       if (hashtag) {
-        posts = posts.filter(p => p.content?.toLowerCase().includes(`#${hashtag.toLowerCase()}`));
+        rawPosts = rawPosts.filter(p => p.content?.toLowerCase().includes(`#${hashtag.toLowerCase()}`));
       }
+
+      posts = rawPosts.map(p => {
+        const liked_by = p.liked_by || [];
+        return {
+          ...p,
+          has_liked: liked_by.includes(req.user.id)
+        };
+      });
     }
 
     res.json(posts);
@@ -135,8 +143,19 @@ router.post('/:id/like', authMiddleware, async (req, res) => {
       const post = store.posts.find(p => p.id === postId);
       if (!post) return res.status(404).json({ error: 'Post not found in scope.' });
 
-      post.likes_count += 1;
-      return res.json({ liked: true, likes_count: post.likes_count });
+      post.liked_by = post.liked_by || [];
+      const userIndex = post.liked_by.indexOf(req.user.id);
+      if (userIndex >= 0) {
+        // Unlike post
+        post.liked_by.splice(userIndex, 1);
+        post.likes_count = Math.max(0, post.likes_count - 1);
+        return res.json({ liked: false, likes_count: post.likes_count });
+      } else {
+        // Like post
+        post.liked_by.push(req.user.id);
+        post.likes_count += 1;
+        return res.json({ liked: true, likes_count: post.likes_count });
+      }
     }
   } catch (err) {
     res.status(500).json({ error: err.message });

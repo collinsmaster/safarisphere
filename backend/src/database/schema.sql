@@ -20,6 +20,36 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Migration: Validate and reinforce unique search constraints on the users table
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+        -- Reinforce unique constraint on username safely
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint 
+            WHERE conname = 'users_username_key' OR (conrelid = 'users'::regclass AND contype = 'u' AND conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'users'::regclass AND attname = 'username')])
+        ) THEN
+            BEGIN
+                ALTER TABLE users ADD CONSTRAINT users_username_key UNIQUE (username);
+            EXCEPTION WHEN others THEN
+                RAISE NOTICE 'Alternative unique constraint exists or username duplicates exist: %', SQLERRM;
+            END;
+        END IF;
+
+        -- Reinforce unique constraint on email safely
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint 
+            WHERE conname = 'users_email_key' OR (conrelid = 'users'::regclass AND contype = 'u' AND conkey = ARRAY[(SELECT attnum FROM pg_attribute WHERE attrelid = 'users'::regclass AND attname = 'email')])
+        ) THEN
+            BEGIN
+                ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email);
+            EXCEPTION WHEN others THEN
+                RAISE NOTICE 'Alternative unique constraint exists or email duplicates exist: %', SQLERRM;
+            END;
+        END IF;
+    END IF;
+END $$;
+
 -- 2. PROFILES
 CREATE TABLE IF NOT EXISTS profiles (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -333,3 +363,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, create
 
 -- Community memberships
 CREATE INDEX IF NOT EXISTS idx_comm_mem_role ON community_members(role);
+
+-- Users lookups and verification indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
