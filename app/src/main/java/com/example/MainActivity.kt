@@ -127,6 +127,7 @@ fun SafariSphereApp() {
   var userLocation by remember { mutableStateOf(prefs.getString("user_location", "Savannah Valley") ?: "Savannah Valley") }
   var userAvatarUrl by remember { mutableStateOf(prefs.getString("user_avatar_url", null)) }
   var userJoinDate by remember { mutableStateOf(prefs.getString("user_join_date", null)) }
+  var userEmail by remember { mutableStateOf(prefs.getString("user_email", "pioneer@safari.com") ?: "pioneer@safari.com") }
   var isFetchingProfile by remember { mutableStateOf(false) }
 
   // State Simulation / Local Fallback Store matching MongoDB / Postgres listings
@@ -223,6 +224,7 @@ fun SafariSphereApp() {
           userLocation = profile.locationLabel ?: userLocation
           userAvatarUrl = profile.avatarUrl
           userJoinDate = profile.createdAt
+          userEmail = profile.email ?: userEmail
           
           prefs.edit()
             .putString("user_nickname", userNickname)
@@ -231,6 +233,7 @@ fun SafariSphereApp() {
             .putString("user_location", userLocation)
             .putString("user_avatar_url", userAvatarUrl)
             .putString("user_join_date", userJoinDate)
+            .putString("user_email", userEmail)
             .apply()
         } catch (e: Exception) {
           // Log or fallback quietly
@@ -672,29 +675,25 @@ fun SafariSphereApp() {
             location = userLocation,
             avatarUrl = userAvatarUrl,
             joinDate = userJoinDate,
+            email = userEmail,
             onMoodSelected = { text, emo ->
               updateMood(text, emo)
             },
-            onProfileUpdated = { newName, newBio, newLoc ->
+            onProfileUpdated = { newName, newBio, newLoc, newAvatar, newHandle, newEmail ->
               userNickname = newName
               userBio = newBio
               userLocation = newLoc
+              userAvatarUrl = if (newAvatar.isEmpty()) null else newAvatar
+              userHandle = newHandle
+              userEmail = newEmail
               prefs.edit()
                 .putString("user_nickname", newName)
                 .putString("user_bio", newBio)
                 .putString("user_location", newLoc)
+                .putString("user_avatar_url", if (newAvatar.isEmpty()) null else newAvatar)
+                .putString("user_handle", newHandle)
+                .putString("user_email", newEmail)
                 .apply()
-              scope.launch {
-                try {
-                  NetworkService.api.editProfile(mapOf(
-                    "displayName" to newName,
-                    "bio" to newBio,
-                    "locationLabel" to newLoc
-                  ))
-                } catch (e: Exception) {
-                  // Fallback quietly
-                }
-              }
             },
             onLogOut = {
               prefs.edit().clear().apply()
@@ -1928,32 +1927,67 @@ fun DiscoverTab(
   ) {
     // Large Header Search bar textfields
     item {
-      Column {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(24.dp))
+          .background(Color.White.copy(alpha = 0.02f))
+          .border(
+            width = 1.dp,
+            color = Color.White.copy(alpha = 0.05f),
+            shape = RoundedCornerShape(24.dp)
+          )
+          .padding(18.dp)
+      ) {
         Text(
           "Discover the Cosmos",
-          fontSize = 18.sp,
+          fontSize = 20.sp,
           fontWeight = FontWeight.ExtraBold,
-          color = Color.White
+          color = Color.White,
+          letterSpacing = (-0.5).sp
         )
         Text(
           "Uncover trending communities and digital landscapes of Safari Sphere",
-          fontSize = 12.sp,
+          fontSize = 11.sp,
           color = Color.Gray,
-          modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+          modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
         )
 
         OutlinedTextField(
           value = searchQuery,
           onValueChange = { searchQuery = it },
-          placeholder = { Text("Search hashtags, pioneers, communities...", color = Color.Gray) },
-          leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Search icon", tint = Color.Gray) },
+          placeholder = { Text("Search hashtags, pioneers, communities...", color = Color.Gray, fontSize = 13.sp) },
+          leadingIcon = { 
+            Icon(
+              imageVector = Icons.Default.Search, 
+              contentDescription = "Search icon", 
+              tint = if (searchQuery.isNotEmpty()) NeonCyan else Color.Gray,
+              modifier = Modifier.size(20.dp)
+            ) 
+          },
+          trailingIcon = {
+            if (searchQuery.isNotEmpty()) {
+              IconButton(onClick = { searchQuery = "" }) {
+                Icon(
+                  imageVector = Icons.Default.Clear, 
+                  contentDescription = "Clear Search", 
+                  tint = Color.Gray,
+                  modifier = Modifier.size(18.dp)
+                )
+              }
+            }
+          },
           colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = NeonCyan,
-            unfocusedBorderColor = Color.DarkGray,
+            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
             focusedTextColor = Color.White,
-            unfocusedTextColor = Color.White
+            unfocusedTextColor = Color.White,
+            focusedContainerColor = Color.Black.copy(alpha = 0.3f),
+            unfocusedContainerColor = Color.Black.copy(alpha = 0.15f)
           ),
-          modifier = Modifier.fillMaxWidth()
+          shape = RoundedCornerShape(16.dp),
+          modifier = Modifier.fillMaxWidth().testTag("discover_search_input"),
+          singleLine = true
         )
       }
     }
@@ -1965,6 +1999,16 @@ fun DiscoverTab(
       explorers.filter {
         it.displayName?.contains(searchQuery, ignoreCase = true) == true ||
         it.username.contains(searchQuery, ignoreCase = true)
+      }
+    }
+
+    val filteredCommunities = if (searchQuery.trim().isEmpty()) {
+      communities
+    } else {
+      communities.filter {
+        it.name.contains(searchQuery, ignoreCase = true) ||
+        it.handle.contains(searchQuery, ignoreCase = true) ||
+        it.vibe.contains(searchQuery, ignoreCase = true)
       }
     }
 
@@ -2065,7 +2109,7 @@ fun DiscoverTab(
     }
 
     // Recommendations Items rendering in Bento grids
-    items(communities) { comm ->
+    items(filteredCommunities) { comm ->
       Surface(
         modifier = Modifier.fillMaxWidth(),
         color = GlassyCard,
@@ -2256,16 +2300,21 @@ fun IdentityTab(
   location: String,
   avatarUrl: String?,
   joinDate: String?,
+  email: String,
   onMoodSelected: (String, String) -> Unit,
-  onProfileUpdated: (nickname: String, bio: String, location: String) -> Unit,
+  onProfileUpdated: (nickname: String, bio: String, location: String, avatarUrl: String, handle: String, email: String) -> Unit,
   onLogOut: () -> Unit
 ) {
+  val context = LocalContext.current
   var showSelectMoodDialog by remember { mutableStateOf(false) }
   var showEditProfileDialog by remember { mutableStateOf(false) }
 
   var editNicknameInput by remember { mutableStateOf(nickname) }
   var editBioInput by remember { mutableStateOf(bio) }
   var editLocationInput by remember { mutableStateOf(location) }
+  var editAvatarInput by remember { mutableStateOf(avatarUrl ?: "") }
+  var editHandleInput by remember { mutableStateOf(handle) }
+  var editEmailInput by remember { mutableStateOf(email) }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -2418,6 +2467,9 @@ fun IdentityTab(
                 editNicknameInput = nickname
                 editBioInput = bio
                 editLocationInput = location
+                editAvatarInput = avatarUrl ?: ""
+                editHandleInput = handle
+                editEmailInput = email
                 showEditProfileDialog = true
               },
               colors = ButtonDefaults.buttonColors(
@@ -2627,87 +2679,343 @@ fun IdentityTab(
   // ----------------------------------------------------------------------------
   // PROFILE EDITING DIALOG POPUP
   // ----------------------------------------------------------------------------
+  // Modern profile editing state variables
+  val scope = rememberCoroutineScope()
+  var isSavingProfile by remember { mutableStateOf(false) }
+  var profileEditError by remember { mutableStateOf("") }
+  var editOtpRequiredMode by remember { mutableStateOf(false) }
+  var editOtpInput by remember { mutableStateOf("") }
+
+  // OTP state tracking with real-time feedback for changing email address
+  var isEditOtpChecking by remember { mutableStateOf(false) }
+  var isEditOtpWrong by remember { mutableStateOf(false) }
+
+  // Preset cybernetic avatars helper
+  val avatarPresets = listOf(
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150",
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150",
+    "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=150"
+  )
+
   if (showEditProfileDialog) {
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(Color.Black.copy(alpha = 0.7f))
+        .background(Color.Black.copy(alpha = 0.82f))
         .clickable { showEditProfileDialog = false },
       contentAlignment = Alignment.Center
     ) {
       Surface(
         modifier = Modifier
-          .fillMaxWidth(0.9f)
-          .wrapContentHeight()
+          .fillMaxWidth(0.92f)
+          .fillMaxHeight(0.85f)
           .clickable(enabled = false) {},
         color = GlassyCard,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        shape = RoundedCornerShape(26.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.09f))
       ) {
         Column(
-          modifier = Modifier.padding(20.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp)
+          modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp)
         ) {
+          // Dialog Header
           Text(
-            "Adapt Grid Identity Synthesis",
+            text = "Adapt Identity Synthesis",
             color = NeonCyan,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp,
+            letterSpacing = (-0.5).sp,
             modifier = Modifier.padding(bottom = 6.dp)
           )
-
-          Text("Explorer Display Name (Nickname)", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          OutlinedTextField(
-            value = editNicknameInput,
-            onValueChange = { editNicknameInput = it },
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = NeonCyan,
-              unfocusedBorderColor = Color.DarkGray,
-              focusedTextColor = Color.White,
-              unfocusedTextColor = Color.White
-            ),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().testTag("edit_nickname_input"),
-            singleLine = true
+          Text(
+            text = "Fine-tune your explorer profile across the entire Safari ecosystem",
+            color = Color.Gray,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(bottom = 14.dp)
           )
 
-          Text("Personal Bio Description", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          OutlinedTextField(
-            value = editBioInput,
-            onValueChange = { editBioInput = it },
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = NeonCyan,
-              unfocusedBorderColor = Color.DarkGray,
-              focusedTextColor = Color.White,
-              unfocusedTextColor = Color.White
-            ),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().testTag("edit_bio_input")
-          )
+          // Scrollable inputs section
+          LazyColumn(
+            modifier = Modifier
+              .weight(1f)
+              .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+          ) {
+            // Error Message Banner if exists
+            if (profileEditError.isNotEmpty()) {
+              item {
+                Surface(
+                  color = DangerCrimson.copy(alpha = 0.15f),
+                  border = BorderStroke(1.dp, DangerCrimson.copy(alpha = 0.3f)),
+                  shape = RoundedCornerShape(10.dp),
+                  modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                ) {
+                  Text(
+                    text = profileEditError,
+                    color = DangerCrimson,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(10.dp)
+                  )
+                }
+              }
+            }
 
-          Text("Sector / Location", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-          OutlinedTextField(
-            value = editLocationInput,
-            onValueChange = { editLocationInput = it },
-            colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = NeonCyan,
-              unfocusedBorderColor = Color.DarkGray,
-              focusedTextColor = Color.White,
-              unfocusedTextColor = Color.White
-            ),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().testTag("edit_location_input"),
-            singleLine = true
-          )
+            // OTP CHANGE EMAIL GATE
+            if (editOtpRequiredMode) {
+              item {
+                Surface(
+                  color = NeonCyan.copy(alpha = 0.08f),
+                  border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.2f)),
+                  shape = RoundedCornerShape(14.dp),
+                  modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                ) {
+                  Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                      "EMAIL VERIFICATION REQUISITION",
+                      color = NeonCyan,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.ExtraBold,
+                      letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                      "To change your registered address, type the 6-digit confirmation proof dispatched to: ${editEmailInput.trim()}",
+                      color = Color.LightGray,
+                      fontSize = 12.sp
+                    )
+                  }
+                }
+              }
 
-          Spacer(modifier = Modifier.height(12.dp))
+              item {
+                Text("Verification Code", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editOtpInput,
+                  onValueChange = { inputVal ->
+                    if (inputVal.length <= 6 && inputVal.all { it.isDigit() }) {
+                      editOtpInput = inputVal
+                      
+                      // Auto trigger validation if reaches 6 digits
+                      if (inputVal.length == 6) {
+                        isSavingProfile = true
+                        isEditOtpChecking = true
+                        isEditOtpWrong = false
+                        profileEditError = ""
+                        scope.launch {
+                          try {
+                            val body = mapOf(
+                              "displayName" to editNicknameInput.trim(),
+                              "bio" to editBioInput.trim(),
+                              "locationLabel" to editLocationInput.trim(),
+                              "avatarUrl" to editAvatarInput.trim(),
+                              "username" to editHandleInput.trim(),
+                              "email" to editEmailInput.trim().lowercase(),
+                              "otp" to inputVal
+                            )
+                            val resp = NetworkService.api.editProfile(body)
+                            android.widget.Toast.makeText(context, "Identity synthesization approved!", android.widget.Toast.LENGTH_SHORT).show()
+                            onProfileUpdated(
+                              editNicknameInput.trim(),
+                              editBioInput.trim(),
+                              editLocationInput.trim(),
+                              editAvatarInput.trim(),
+                              editHandleInput.trim(),
+                              editEmailInput.trim().lowercase()
+                            )
+                            showEditProfileDialog = false
+                            editOtpRequiredMode = false
+                            editOtpInput = ""
+                          } catch (e: Exception) {
+                            isEditOtpWrong = true
+                            profileEditError = "✗ Verification Code incorrect: " + (e.localizedMessage ?: "Please confirm digits.")
+                          } finally {
+                            isSavingProfile = false
+                            isEditOtpChecking = false
+                          }
+                        }
+                      }
+                    }
+                  },
+                  placeholder = { Text("Enter 6-digit OTP code", color = Color.Gray) },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = if (isEditOtpWrong) DangerCrimson else NeonCyan,
+                    unfocusedBorderColor = if (isEditOtpWrong) DangerCrimson.copy(alpha = 0.5f) else Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_email_otp_input"),
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  singleLine = true,
+                  trailingIcon = {
+                    if (isEditOtpChecking) {
+                      CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else if (isEditOtpWrong) {
+                      Icon(imageVector = Icons.Default.Warning, contentDescription = "Error icon", tint = DangerCrimson, modifier = Modifier.size(18.dp))
+                    }
+                  }
+                )
+                
+                if (isEditOtpWrong) {
+                  Text(
+                    text = "The OTP code was incorrect. Please review the emails.",
+                    color = DangerCrimson,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 4.dp)
+                  )
+                }
+              }
+            } else {
+              // ALL EDITABLE PROFILE FIELDS
+              item {
+                Text("Explorer Display Name (Nickname)", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editNicknameInput,
+                  onValueChange = { editNicknameInput = it },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_nickname_input"),
+                  singleLine = true
+                )
+              }
 
+              item {
+                Text("Unique Handle (Username)", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editHandleInput,
+                  onValueChange = { editHandleInput = it },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_handle_input"),
+                  singleLine = true
+                )
+              }
+
+              item {
+                Text("Registered Email Address", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editEmailInput,
+                  onValueChange = { editEmailInput = it },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_email_input"),
+                  singleLine = true
+                )
+              }
+
+              item {
+                Text("Personal Bio Description", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editBioInput,
+                  onValueChange = { editBioInput = it },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_bio_input")
+                )
+              }
+
+              item {
+                Text("Sector / Location", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editLocationInput,
+                  onValueChange = { editLocationInput = it },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_location_input"),
+                  singleLine = true
+                )
+              }
+
+              item {
+                Text("Avatar Icon Presets", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(10.dp),
+                  modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                  avatarPresets.forEach { url ->
+                    val isSelected = editAvatarInput == url
+                    Box(
+                      modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .border(
+                          width = if (isSelected) 3.dp else 1.dp,
+                          color = if (isSelected) SoftNeonMint else Color.White.copy(alpha = 0.15f),
+                          shape = CircleShape
+                        )
+                        .clickable { editAvatarInput = url }
+                    ) {
+                      AsyncImage(
+                        model = url,
+                        contentDescription = "Avatar preset option",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                      )
+                    }
+                  }
+                }
+              }
+
+              item {
+                Text("Avatar Custom URL", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                  value = editAvatarInput,
+                  onValueChange = { editAvatarInput = it },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  modifier = Modifier.fillMaxWidth().testTag("edit_avatar_input"),
+                  singleLine = true
+                )
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          // Bottom Action Buttons
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             Button(
-              onClick = { showEditProfileDialog = false },
+              onClick = { 
+                showEditProfileDialog = false 
+                editOtpRequiredMode = false
+                editOtpInput = ""
+              },
               colors = ButtonDefaults.buttonColors(
                 containerColor = Color.White.copy(alpha = 0.05f),
                 contentColor = Color.Gray
@@ -2718,19 +3026,124 @@ fun IdentityTab(
               Text("Cancel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
 
-            Button(
-              onClick = {
-                onProfileUpdated(editNicknameInput, editBioInput, editLocationInput)
-                showEditProfileDialog = false
-              },
-              colors = ButtonDefaults.buttonColors(
-                containerColor = NeonCyan,
-                contentColor = Color.Black
-              ),
-              modifier = Modifier.weight(1f),
-              shape = RoundedCornerShape(12.dp)
-            ) {
-              Text("Save & Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            if (!editOtpRequiredMode) {
+              Button(
+                onClick = {
+                  if (isSavingProfile) return@Button
+                  isSavingProfile = true
+                  profileEditError = ""
+                  scope.launch {
+                    try {
+                      val body = mapOf(
+                        "displayName" to editNicknameInput.trim(),
+                        "bio" to editBioInput.trim(),
+                        "locationLabel" to editLocationInput.trim(),
+                        "avatarUrl" to editAvatarInput.trim(),
+                        "username" to editHandleInput.trim(),
+                        "email" to editEmailInput.trim().lowercase()
+                      )
+                      val resp = NetworkService.api.editProfile(body)
+                      if (resp.requiresOtp == true) {
+                        editOtpRequiredMode = true
+                      } else {
+                        android.widget.Toast.makeText(context, "Identity credentials updated!", android.widget.Toast.LENGTH_SHORT).show()
+                        onProfileUpdated(
+                          editNicknameInput.trim(),
+                          editBioInput.trim(),
+                          editLocationInput.trim(),
+                          editAvatarInput.trim(),
+                          editHandleInput.trim(),
+                          editEmailInput.trim().lowercase()
+                        )
+                        showEditProfileDialog = false
+                      }
+                    } catch (e: Exception) {
+                      profileEditError = e.localizedMessage ?: "Failed updating credentials."
+                    } finally {
+                      isSavingProfile = false
+                    }
+                  }
+                },
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = NeonCyan,
+                  contentColor = Color.Black
+                ),
+                modifier = Modifier.weight(1.5f),
+                shape = RoundedCornerShape(12.dp),
+                enabled = !isSavingProfile
+              ) {
+                if (isSavingProfile) {
+                  CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(16.dp))
+                } else {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Check, contentDescription = "Save icon", modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Save & Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
+              }
+            } else {
+              // When in OTP verifying mode, show a different direct verification submit button
+              Button(
+                onClick = {
+                  if (editOtpInput.trim().length != 6) {
+                    profileEditError = "Please input the 6-digit code register."
+                    return@Button
+                  }
+                  isSavingProfile = true
+                  profileEditError = ""
+                  isEditOtpChecking = true
+                  scope.launch {
+                    try {
+                      val body = mapOf(
+                        "displayName" to editNicknameInput.trim(),
+                        "bio" to editBioInput.trim(),
+                        "locationLabel" to editLocationInput.trim(),
+                        "avatarUrl" to editAvatarInput.trim(),
+                        "username" to editHandleInput.trim(),
+                        "email" to editEmailInput.trim().lowercase(),
+                        "otp" to editOtpInput.trim()
+                      )
+                      val resp = NetworkService.api.editProfile(body)
+                      android.widget.Toast.makeText(context, "Email update successfully verified!", android.widget.Toast.LENGTH_SHORT).show()
+                      onProfileUpdated(
+                        editNicknameInput.trim(),
+                        editBioInput.trim(),
+                        editLocationInput.trim(),
+                        editAvatarInput.trim(),
+                        editHandleInput.trim(),
+                        editEmailInput.trim().lowercase()
+                      )
+                      showEditProfileDialog = false
+                      editOtpRequiredMode = false
+                      editOtpInput = ""
+                    } catch (e: Exception) {
+                      isEditOtpWrong = true
+                      profileEditError = "✗ Verification Code is incorrect. Please check the digits."
+                    } finally {
+                      isSavingProfile = false
+                      isEditOtpChecking = false
+                    }
+                  }
+                },
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = SoftNeonMint,
+                  contentColor = Color.Black
+                ),
+                modifier = Modifier.weight(1.5f),
+                shape = RoundedCornerShape(12.dp),
+                enabled = !isSavingProfile && editOtpInput.trim().length == 6
+              ) {
+                if (isSavingProfile) {
+                  CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(16.dp))
+                } else {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.CheckCircle, contentDescription = "Verify check", modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Verify & Confirm", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
+              }
             }
           }
         }
@@ -3302,6 +3715,47 @@ fun BentoAuthScreen(
                   }
                 }
 
+                 // OTP state tracking with real-time feedback
+                var isOtpChecking by remember { mutableStateOf(false) }
+                var isOtpCorrect by remember { mutableStateOf(false) }
+                var isOtpWrong by remember { mutableStateOf(false) }
+
+                LaunchedEffect(otpInput) {
+                  val trimmed = otpInput.trim()
+                  if (trimmed.length < 6) {
+                    isOtpCorrect = false
+                    isOtpWrong = false
+                    if (authErrorMessage.contains("incorrect", ignoreCase = true) || authErrorMessage.contains("Failed", ignoreCase = true)) {
+                      authErrorMessage = ""
+                    }
+                  } else if (trimmed.length == 6) {
+                    isOtpChecking = true
+                    authErrorMessage = ""
+                    try {
+                      val body = mutableMapOf(
+                        "email" to emailInput.trim(),
+                        "password" to passwordInput,
+                        "username" to usernameInput.trim(),
+                        "displayName" to nicknameInput.trim(),
+                        "otp" to trimmed
+                      )
+                      val response = NetworkService.api.signup(body)
+                      val token = response.token ?: "mock_token"
+                      isOtpCorrect = true
+                      isOtpWrong = false
+                      delay(800) // Brief beautiful glow pause
+                      onAuthenticated(nicknameInput.trim(), usernameInput.trim(), token)
+                      android.widget.Toast.makeText(context, "Identity Verified! Welcome to the sphere.", android.widget.Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                      isOtpCorrect = false
+                      isOtpWrong = true
+                      authErrorMessage = "✗ Verification Code is incorrect. Please check the digits."
+                    } finally {
+                      isOtpChecking = false
+                    }
+                  }
+                }
+
                 // OTP Countdown state tracking
                 var resendCountdown by remember { mutableIntStateOf(40) }
                 LaunchedEffect(showOtpVerifyInput) {
@@ -3316,8 +3770,8 @@ fun BentoAuthScreen(
 
                 // Input Guidance Banner
                 Text(
-                  text = "Type the digits below to establish full user identity.",
-                  color = Color.Gray,
+                  text = if (isOtpChecking) "Attuning validation wave..." else "Type the digits below to establish full user identity.",
+                  color = if (isOtpChecking) NeonCyan else Color.Gray,
                   fontSize = 12.sp,
                   modifier = Modifier.padding(bottom = 8.dp)
                 )
@@ -3351,11 +3805,15 @@ fun BentoAuthScreen(
                           val isFocusedSlot = otpInput.length == index
                           val hasChar = char.isNotEmpty()
                           val borderStrokeColor = when {
+                            isOtpCorrect -> SoftNeonMint
+                            isOtpWrong -> DangerCrimson
                             isFocusedSlot -> NeonCyan
                             hasChar -> SoftNeonMint
                             else -> Color.White.copy(alpha = 0.12f)
                           }
                           val backgroundBoxColor = when {
+                            isOtpCorrect -> SoftNeonMint.copy(alpha = 0.12f)
+                            isOtpWrong -> DangerCrimson.copy(alpha = 0.12f)
                             isFocusedSlot -> NeonCyan.copy(alpha = 0.08f)
                             hasChar -> SoftNeonMint.copy(alpha = 0.04f)
                             else -> Color.White.copy(alpha = 0.02f)
@@ -3368,23 +3826,25 @@ fun BentoAuthScreen(
                               .clip(RoundedCornerShape(12.dp))
                               .background(backgroundBoxColor)
                               .border(
-                                width = if (isFocusedSlot) 2.dp else 1.dp,
+                                width = if (isOtpCorrect || isOtpWrong) 2.dp else if (isFocusedSlot) 2.dp else 1.dp,
                                 color = borderStrokeColor,
                                 shape = RoundedCornerShape(12.dp)
                               ),
                             contentAlignment = Alignment.Center
                           ) {
-                            if (isFocusedSlot) {
+                            if (isFocusedSlot && !isOtpChecking) {
                               Box(
                                 modifier = Modifier
                                   .width(2.dp)
                                   .height(18.dp)
                                   .background(NeonCyan)
                               )
+                            } else if (isOtpChecking && isFocusedSlot) {
+                              CircularProgressIndicator(modifier = Modifier.size(14.dp), color = NeonCyan, strokeWidth = 2.dp)
                             } else {
                               Text(
                                 text = char,
-                                color = if (hasChar) Color.White else Color.Gray.copy(alpha = 0.4f),
+                                color = if (isOtpCorrect) SoftNeonMint else if (isOtpWrong) DangerCrimson else if (hasChar) Color.White else Color.Gray.copy(alpha = 0.4f),
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold
                               )
@@ -3743,7 +4203,32 @@ fun BentoAuthScreen(
                       if (isEmailValidating) {
                         Text("Sifting archive registries...", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                       } else if (emailBackendError != null) {
-                        Text("✗ Registered: $emailBackendError", color = DangerCrimson, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.Start
+                        ) {
+                          Text("✗ ", color = DangerCrimson, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                          Text(
+                            text = "login?",
+                            color = Color(0xFF64B5F6),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            style = TextStyle(textDecoration = TextDecoration.Underline),
+                            modifier = Modifier
+                              .clickable {
+                                isSignUp = false
+                                authErrorMessage = ""
+                                showOtpVerifyInput = false
+                              }
+                              .padding(end = 4.dp)
+                          )
+                          Text(
+                            text = "email is registered. Login",
+                            color = DangerCrimson,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                          )
+                        }
                       } else if (isEmailAvailable) {
                         Text("✓ Email address available!", color = SoftNeonMint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                       }

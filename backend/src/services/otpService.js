@@ -15,6 +15,9 @@ const emailjsPrivateKey = process.env.EMAILJS_PRIVATE_KEY || process.env.PRIVATE
 // In-memory store for OTP codes when Twilio/EmailJS is not fully configured (fallback development mode)
 const fallbackOtpStore = {};
 
+// Cache for persistent OTP codes valid for 30 minutes
+const activeOtpStore = {};
+
 const isTwilioConfigured = !!(accountSid && authToken && serviceId);
 const isEmailJSConfigured = !!(emailjsServiceId && emailjsTemplateId && emailjsPublicKey && emailjsPrivateKey);
 
@@ -86,10 +89,23 @@ async function sendOTP(destination) {
   const isEmail = destination.includes('@');
   const channel = isEmail ? 'email' : 'sms';
 
+  const now = Date.now();
+  let otpCode;
+  if (activeOtpStore[destination] && activeOtpStore[destination].expiresAt > now) {
+    otpCode = activeOtpStore[destination].code;
+    console.log(`[OTP Service] Reusing valid OTP ${otpCode} (expires in ${Math.round((activeOtpStore[destination].expiresAt - now) / 1000)}s) for ${destination}`);
+  } else {
+    otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    activeOtpStore[destination] = {
+      code: otpCode,
+      expiresAt: now + 30 * 60 * 1000 // 30 minutes
+    };
+    console.log(`[OTP Service] Generated fresh 30-min OTP ${otpCode} for ${destination}`);
+  }
+
   // Try EmailJS first for Email destinations if configured
   if (isEmail && isEmailJSConfigured) {
     try {
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       fallbackOtpStore[destination] = otpCode;
 
       console.log(`[OTP Service] Sending EmailJS OTP code ${otpCode} to ${destination}...`);
@@ -130,21 +146,20 @@ async function sendOTP(destination) {
   }
 
   // Fallback / Development mode OTP
-  const mockCode = '123456'; 
-  fallbackOtpStore[destination] = mockCode;
+  fallbackOtpStore[destination] = otpCode;
   
   console.log(`==========================================`);
   console.log(`[DEVELOPMENT OTP BYPASS]`);
   console.log(`Destination: ${destination}`);
-  console.log(`Verification Code: ${mockCode}`);
-  console.log(`Please use code ${mockCode} to complete authorization.`);
+  console.log(`Verification Code: ${otpCode}`);
+  console.log(`Please use code ${otpCode} to complete authorization.`);
   console.log(`==========================================`);
 
   return { 
     success: true, 
-    message: `[Fallback Mode] Code of '${mockCode}' generated and printed to server logs for ${destination}!`,
+    message: `[Fallback Mode] Code of '${otpCode}' generated and printed to server logs for ${destination}!`,
     channel,
-    debugOtp: mockCode
+    debugOtp: otpCode
   };
 }
 
@@ -174,7 +189,7 @@ async function verifyOTP(destination, code) {
 
   // Fallback Check
   const expectedCodes = ['123456', '123123']; // allow easy developer testing
-  const storedCode = fallbackOtpStore[destination];
+  const storedCode = fallbackOtpStore[destination] || (activeOtpStore[destination] && activeOtpStore[destination].expiresAt > Date.now() ? activeOtpStore[destination].code : null);
   
   if (code === storedCode || expectedCodes.includes(code)) {
     delete fallbackOtpStore[destination];
