@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -128,6 +131,8 @@ fun SafariSphereApp() {
   var userAvatarUrl by remember { mutableStateOf(prefs.getString("user_avatar_url", null)) }
   var userJoinDate by remember { mutableStateOf(prefs.getString("user_join_date", null)) }
   var userEmail by remember { mutableStateOf(prefs.getString("user_email", "pioneer@safari.com") ?: "pioneer@safari.com") }
+  var userHeadline by remember { mutableStateOf(prefs.getString("user_headline", "Exploring uncharted digital frequencies...") ?: "Exploring uncharted digital frequencies...") }
+  var userInterests by remember { mutableStateOf(prefs.getString("user_interests", "Wildlife Safari, Sound Design, Live Beats") ?: "Wildlife Safari, Sound Design, Live Beats") }
   var isFetchingProfile by remember { mutableStateOf(false) }
 
   // State Simulation / Local Fallback Store matching MongoDB / Postgres listings
@@ -676,16 +681,20 @@ fun SafariSphereApp() {
             avatarUrl = userAvatarUrl,
             joinDate = userJoinDate,
             email = userEmail,
+            headline = userHeadline,
+            interests = userInterests,
             onMoodSelected = { text, emo ->
               updateMood(text, emo)
             },
-            onProfileUpdated = { newName, newBio, newLoc, newAvatar, newHandle, newEmail ->
+            onProfileUpdated = { newName, newBio, newLoc, newAvatar, newHandle, newEmail, newHeadline, newInterests ->
               userNickname = newName
               userBio = newBio
               userLocation = newLoc
               userAvatarUrl = if (newAvatar.isEmpty()) null else newAvatar
               userHandle = newHandle
               userEmail = newEmail
+              userHeadline = newHeadline
+              userInterests = newInterests
               prefs.edit()
                 .putString("user_nickname", newName)
                 .putString("user_bio", newBio)
@@ -693,6 +702,8 @@ fun SafariSphereApp() {
                 .putString("user_avatar_url", if (newAvatar.isEmpty()) null else newAvatar)
                 .putString("user_handle", newHandle)
                 .putString("user_email", newEmail)
+                .putString("user_headline", newHeadline)
+                .putString("user_interests", newInterests)
                 .apply()
             },
             onLogOut = {
@@ -707,6 +718,8 @@ fun SafariSphereApp() {
               userLocation = "Savannah Valley"
               userAvatarUrl = null
               userJoinDate = null
+              userHeadline = "Exploring uncharted digital frequencies..."
+              userInterests = "Wildlife Safari, Sound Design, Live Beats"
               isAuthenticated = false
               selectedTab = 0
             }
@@ -2301,20 +2314,51 @@ fun IdentityTab(
   avatarUrl: String?,
   joinDate: String?,
   email: String,
+  headline: String,
+  interests: String,
   onMoodSelected: (String, String) -> Unit,
-  onProfileUpdated: (nickname: String, bio: String, location: String, avatarUrl: String, handle: String, email: String) -> Unit,
+  onProfileUpdated: (nickname: String, bio: String, location: String, avatarUrl: String, handle: String, email: String, headline: String, interests: String) -> Unit,
   onLogOut: () -> Unit
 ) {
   val context = LocalContext.current
+  val prefs = remember { context.getSharedPreferences("safari_sphere_prefs", android.content.Context.MODE_PRIVATE) }
+  var hasDraft by remember { mutableStateOf(prefs.getBoolean("profile_draft_exists", false)) }
+
+  var editNicknameInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_nickname", nickname) ?: nickname else nickname) }
+  var editBioInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_bio", bio) ?: bio else bio) }
+  var editLocationInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_location", location) ?: location else location) }
+  var editAvatarInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_avatar", avatarUrl ?: "") ?: "" else avatarUrl ?: "") }
+  var editHandleInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_handle", handle) ?: handle else handle) }
+  var editEmailInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_email", email) ?: email else email) }
+  var editHeadlineInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_headline", headline) ?: headline else headline) }
+  var editInterestsInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_interests", interests) ?: interests else interests) }
+
   var showSelectMoodDialog by remember { mutableStateOf(false) }
   var showEditProfileDialog by remember { mutableStateOf(false) }
 
-  var editNicknameInput by remember { mutableStateOf(nickname) }
-  var editBioInput by remember { mutableStateOf(bio) }
-  var editLocationInput by remember { mutableStateOf(location) }
-  var editAvatarInput by remember { mutableStateOf(avatarUrl ?: "") }
-  var editHandleInput by remember { mutableStateOf(handle) }
-  var editEmailInput by remember { mutableStateOf(email) }
+  var lastAutoSaveTime by remember { mutableStateOf("") }
+
+  LaunchedEffect(showEditProfileDialog) {
+    if (showEditProfileDialog) {
+      while (true) {
+        delay(5000)
+        prefs.edit()
+          .putBoolean("profile_draft_exists", true)
+          .putString("draft_nickname", editNicknameInput)
+          .putString("draft_bio", editBioInput)
+          .putString("draft_location", editLocationInput)
+          .putString("draft_avatar", editAvatarInput)
+          .putString("draft_handle", editHandleInput)
+          .putString("draft_email", editEmailInput)
+          .putString("draft_headline", editHeadlineInput)
+          .putString("draft_interests", editInterestsInput)
+          .apply()
+        hasDraft = true
+        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+        lastAutoSaveTime = sdf.format(java.util.Date())
+      }
+    }
+  }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -2383,6 +2427,32 @@ fun IdentityTab(
             fontSize = 13.sp
           )
 
+          if (headline.isNotEmpty()) {
+            Surface(
+              color = NeonCyan.copy(alpha = 0.05f),
+              border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.12f)),
+              shape = RoundedCornerShape(12.dp),
+              modifier = Modifier.padding(top = 8.dp, bottom = 4.dp).testTag("profile_headline_badge")
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+              ) {
+                Text("💬", fontSize = 11.sp)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = headline,
+                  color = Color.White.copy(alpha = 0.92f),
+                  fontSize = 11.sp,
+                  fontStyle = FontStyle.Italic,
+                  fontWeight = FontWeight.Medium,
+                  textAlign = TextAlign.Center
+                )
+              }
+            }
+          }
+
           Text(
             bio,
             color = Color.LightGray,
@@ -2440,6 +2510,41 @@ fun IdentityTab(
             )
           }
 
+          // Dynamic Interests Tags Display section
+          val parsedInterestsList = remember(interests) {
+            if (interests.trim().isEmpty()) emptyList<String>()
+            else interests.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+          }
+          
+          if (parsedInterestsList.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .testTag("profile_interests_scroll_row"),
+              horizontalArrangement = Arrangement.Center,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              parsedInterestsList.forEach { tagVal ->
+                Surface(
+                  color = BentoIndigo.copy(alpha = 0.15f),
+                  border = BorderStroke(1.dp, SoftNeonMint.copy(alpha = 0.25f)),
+                  shape = RoundedCornerShape(8.dp),
+                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                  Text(
+                    text = tagVal,
+                    color = SoftNeonMint,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                  )
+                }
+              }
+            }
+          }
+
           Spacer(modifier = Modifier.height(14.dp))
 
           Row(
@@ -2464,12 +2569,28 @@ fun IdentityTab(
             // Adapt Identity button
             Button(
               onClick = {
-                editNicknameInput = nickname
-                editBioInput = bio
-                editLocationInput = location
-                editAvatarInput = avatarUrl ?: ""
-                editHandleInput = handle
-                editEmailInput = email
+                val draftExists = prefs.getBoolean("profile_draft_exists", false)
+                if (draftExists) {
+                  editNicknameInput = prefs.getString("draft_nickname", nickname) ?: nickname
+                  editBioInput = prefs.getString("draft_bio", bio) ?: bio
+                  editLocationInput = prefs.getString("draft_location", location) ?: location
+                  editAvatarInput = prefs.getString("draft_avatar", avatarUrl ?: "") ?: ""
+                  editHandleInput = prefs.getString("draft_handle", handle) ?: handle
+                  editEmailInput = prefs.getString("draft_email", email) ?: email
+                  editHeadlineInput = prefs.getString("draft_headline", headline) ?: headline
+                  editInterestsInput = prefs.getString("draft_interests", interests) ?: interests
+                  hasDraft = true
+                } else {
+                  editNicknameInput = nickname
+                  editBioInput = bio
+                  editLocationInput = location
+                  editAvatarInput = avatarUrl ?: ""
+                  editHandleInput = handle
+                  editEmailInput = email
+                  editHeadlineInput = headline
+                  editInterestsInput = interests
+                  hasDraft = false
+                }
                 showEditProfileDialog = true
               },
               colors = ButtonDefaults.buttonColors(
@@ -2721,14 +2842,38 @@ fun IdentityTab(
             .padding(20.dp)
         ) {
           // Dialog Header
-          Text(
-            text = "Adapt Identity Synthesis",
-            color = NeonCyan,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 18.sp,
-            letterSpacing = (-0.5).sp,
-            modifier = Modifier.padding(bottom = 6.dp)
-          )
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "Adapt Identity Synthesis",
+              color = NeonCyan,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 18.sp,
+              letterSpacing = (-0.5).sp
+            )
+            
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.End
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(if (lastAutoSaveTime.isNotEmpty()) SoftNeonMint else Color.Gray)
+              )
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(
+                text = if (lastAutoSaveTime.isNotEmpty()) "Draft saved at $lastAutoSaveTime" else "Auto-save active (5s)",
+                color = Color.Gray,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
+          }
           Text(
             text = "Fine-tune your explorer profile across the entire Safari ecosystem",
             color = Color.Gray,
@@ -2743,6 +2888,64 @@ fun IdentityTab(
               .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
           ) {
+            if (hasDraft) {
+              item {
+                Surface(
+                  color = SoftNeonMint.copy(alpha = 0.08f),
+                  border = BorderStroke(1.dp, SoftNeonMint.copy(alpha = 0.2f)),
+                  shape = RoundedCornerShape(14.dp),
+                  modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).testTag("draft_restored_banner")
+                ) {
+                  Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                  ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(
+                        "RESTORED DRAFT DETECTED",
+                        color = SoftNeonMint,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp
+                      )
+                      Spacer(modifier = Modifier.height(4.dp))
+                      Text(
+                        "Your unsaved details were recovered so you didn't lose any progress.",
+                        color = Color.LightGray,
+                        fontSize = 11.sp
+                      )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Button(
+                      onClick = {
+                        prefs.edit().putBoolean("profile_draft_exists", false).apply()
+                        editNicknameInput = nickname
+                        editBioInput = bio
+                        editLocationInput = location
+                        editAvatarInput = avatarUrl ?: ""
+                        editHandleInput = handle
+                        editEmailInput = email
+                        editHeadlineInput = headline
+                        editInterestsInput = interests
+                        hasDraft = false
+                        android.widget.Toast.makeText(context, "Draft cleared. Reset to profile standard.", android.widget.Toast.LENGTH_SHORT).show()
+                      },
+                      colors = ButtonDefaults.buttonColors(
+                        containerColor = DangerCrimson.copy(alpha = 0.2f),
+                        contentColor = DangerCrimson
+                      ),
+                      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                      shape = RoundedCornerShape(8.dp),
+                      modifier = Modifier.testTag("clear_draft_button").height(28.dp)
+                    ) {
+                      Text("Discard", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                  }
+                }
+              }
+            }
+
             // Error Message Banner if exists
             if (profileEditError.isNotEmpty()) {
               item {
@@ -2823,8 +3026,12 @@ fun IdentityTab(
                               editLocationInput.trim(),
                               editAvatarInput.trim(),
                               editHandleInput.trim(),
-                              editEmailInput.trim().lowercase()
+                              editEmailInput.trim().lowercase(),
+                              editHeadlineInput.trim(),
+                              editInterestsInput.trim()
                             )
+                            prefs.edit().putBoolean("profile_draft_exists", false).apply()
+                            hasDraft = false
                             showEditProfileDialog = false
                             editOtpRequiredMode = false
                             editOtpInput = ""
@@ -2956,6 +3163,195 @@ fun IdentityTab(
               }
 
               item {
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("Short Headline Status", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  Text(
+                    text = "${editHeadlineInput.length}/60",
+                    color = if (editHeadlineInput.length > 55) DangerCrimson else Color.Gray,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                }
+                
+                OutlinedTextField(
+                  value = editHeadlineInput,
+                  onValueChange = { newVal ->
+                    if (newVal.length <= 60) {
+                      editHeadlineInput = newVal
+                    }
+                  },
+                  placeholder = { Text("E.g. Listening to radio waves...", color = Color.Gray, fontSize = 12.sp) },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  singleLine = true,
+                  modifier = Modifier.fillMaxWidth().testTag("edit_headline_input")
+                )
+
+                // Status Emoji Quick Picker Row
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  val emojis = listOf("💬", "🚀", "🪐", "🦁", "💻", "✨", "🔥", "🎧", "🎮", "🌟", "👾", "🏕️", "🛸", "🤖")
+                  emojis.forEach { emoji ->
+                    Box(
+                      modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .clickable {
+                          if (editHeadlineInput.length + emoji.length <= 60) {
+                            editHeadlineInput = editHeadlineInput + emoji
+                          }
+                        }
+                        .testTag("emoji_picker_$emoji"),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      Text(emoji, fontSize = 14.sp)
+                    }
+                  }
+                }
+              }
+
+              item {
+                Text("Interests & Orbit Tags", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                
+                val currentInterestsList = remember(editInterestsInput) {
+                  if (editInterestsInput.trim().isEmpty()) emptyList<String>()
+                  else editInterestsInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                }
+
+                var newInterestText by remember { mutableStateOf("") }
+                
+                OutlinedTextField(
+                  value = newInterestText,
+                  onValueChange = { newInterestText = it },
+                  placeholder = { Text("E.g. Quantum Physics, Live Beats...", color = Color.Gray, fontSize = 12.sp) },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.DarkGray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  shape = RoundedCornerShape(12.dp),
+                  singleLine = true,
+                  trailingIcon = {
+                    IconButton(
+                      modifier = Modifier.testTag("add_interest_button"),
+                      onClick = {
+                        val trimmed = newInterestText.trim()
+                        if (trimmed.isNotEmpty()) {
+                          if (!currentInterestsList.any { it.equals(trimmed, ignoreCase = true) }) {
+                            val newList = currentInterestsList + trimmed
+                            editInterestsInput = newList.joinToString(", ")
+                          }
+                          newInterestText = ""
+                        }
+                      }
+                    ) {
+                      Icon(imageVector = Icons.Default.Add, contentDescription = "Add tag", tint = SoftNeonMint)
+                    }
+                  },
+                  modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                )
+
+                // Current tags list with interactive delete action
+                if (currentInterestsList.isNotEmpty()) {
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .horizontalScroll(rememberScrollState())
+                      .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                  ) {
+                    currentInterestsList.forEach { tagStr ->
+                      Surface(
+                        color = BentoIndigo.copy(alpha = 0.2f),
+                        border = BorderStroke(1.dp, SoftNeonMint.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("interest_tag_$tagStr")
+                      ) {
+                        Row(
+                          verticalAlignment = Alignment.CenterVertically,
+                          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                          Text(
+                            text = tagStr,
+                            color = SoftNeonMint,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                          )
+                          Spacer(modifier = Modifier.width(4.dp))
+                          Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove tag",
+                            tint = DangerCrimson,
+                            modifier = Modifier
+                              .size(12.dp)
+                              .clickable {
+                                val newList = currentInterestsList - tagStr
+                                editInterestsInput = newList.joinToString(", ")
+                              }
+                          )
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // Preset Interests Row
+                Text("Quick Add Orbit Presets:", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp, bottom = 4.dp))
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                  horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                  val presets = listOf("AI", "Web3", "Gaming", "Beats", "Cosmos", "Design", "Biology", "Cyber-Punk")
+                  presets.forEach { preset ->
+                    val isAdded = currentInterestsList.any { it.equals(preset, ignoreCase = true) }
+                    Surface(
+                      color = if (isAdded) NeonCyan.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.04f),
+                      border = BorderStroke(1.dp, if (isAdded) NeonCyan else Color.White.copy(alpha = 0.1f)),
+                      shape = RoundedCornerShape(6.dp),
+                      modifier = Modifier
+                        .clickable {
+                          if (isAdded) {
+                            val filtered = currentInterestsList.filter { !it.equals(preset, ignoreCase = true) }
+                            editInterestsInput = filtered.joinToString(", ")
+                          } else {
+                            val newList = currentInterestsList + preset
+                            editInterestsInput = newList.joinToString(", ")
+                          }
+                        }
+                        .testTag("preset_interest_$preset")
+                    ) {
+                      Text(
+                        text = if (isAdded) "✓ $preset" else "+ $preset",
+                        color = if (isAdded) NeonCyan else Color.Gray,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                      )
+                    }
+                  }
+                }
+              }
+
+              item {
                 Text("Avatar Icon Presets", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Row(
                   horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -3040,7 +3436,9 @@ fun IdentityTab(
                         "locationLabel" to editLocationInput.trim(),
                         "avatarUrl" to editAvatarInput.trim(),
                         "username" to editHandleInput.trim(),
-                        "email" to editEmailInput.trim().lowercase()
+                        "email" to editEmailInput.trim().lowercase(),
+                        "headline" to editHeadlineInput.trim(),
+                        "interests" to editInterestsInput.trim()
                       )
                       val resp = NetworkService.api.editProfile(body)
                       if (resp.requiresOtp == true) {
@@ -3053,8 +3451,12 @@ fun IdentityTab(
                           editLocationInput.trim(),
                           editAvatarInput.trim(),
                           editHandleInput.trim(),
-                          editEmailInput.trim().lowercase()
+                          editEmailInput.trim().lowercase(),
+                          editHeadlineInput.trim(),
+                          editInterestsInput.trim()
                         )
+                        prefs.edit().putBoolean("profile_draft_exists", false).apply()
+                        hasDraft = false
                         showEditProfileDialog = false
                       }
                     } catch (e: Exception) {
@@ -3102,7 +3504,9 @@ fun IdentityTab(
                         "avatarUrl" to editAvatarInput.trim(),
                         "username" to editHandleInput.trim(),
                         "email" to editEmailInput.trim().lowercase(),
-                        "otp" to editOtpInput.trim()
+                        "otp" to editOtpInput.trim(),
+                        "headline" to editHeadlineInput.trim(),
+                        "interests" to editInterestsInput.trim()
                       )
                       val resp = NetworkService.api.editProfile(body)
                       android.widget.Toast.makeText(context, "Email update successfully verified!", android.widget.Toast.LENGTH_SHORT).show()
@@ -3112,8 +3516,12 @@ fun IdentityTab(
                         editLocationInput.trim(),
                         editAvatarInput.trim(),
                         editHandleInput.trim(),
-                        editEmailInput.trim().lowercase()
+                        editEmailInput.trim().lowercase(),
+                        editHeadlineInput.trim(),
+                        editInterestsInput.trim()
                       )
+                      prefs.edit().putBoolean("profile_draft_exists", false).apply()
+                      hasDraft = false
                       showEditProfileDialog = false
                       editOtpRequiredMode = false
                       editOtpInput = ""
