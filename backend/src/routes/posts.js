@@ -56,26 +56,28 @@ router.get('/', authMiddleware, async (req, res) => {
 router.post('/', authMiddleware, async (req, res) => {
   const { content, mediaUrl, mediaType, vibeCategory, lat, lng, locationName } = req.body;
 
-  if (!content) {
-    return res.status(400).json({ error: 'Post content paragraph is empty.' });
+  if (!content && !mediaUrl) {
+    return res.status(400).json({ error: 'Post content paragraph or media is required.' });
   }
 
   try {
     // TRIGGER ACTUAL AI MODERATION HOOK
-    const moderation = await aiService.moderateContent('post', content);
-    if (!moderation.isSafe) {
-      return res.status(400).json({
-        error: 'Content flagged as unsafe by SphereMate AI moderation filters.',
-        reason: moderation.reason,
-        toxicityScore: moderation.toxicityScore
-      });
+    if (content) {
+      const moderation = await aiService.moderateContent('post', content);
+      if (!moderation.isSafe) {
+        return res.status(400).json({
+          error: 'Content flagged as unsafe by SphereMate AI moderation filters.',
+          reason: moderation.reason,
+          toxicityScore: moderation.toxicityScore
+        });
+      }
     }
 
     const postId = `p_${Date.now()}`;
     const newPost = {
       id: postId,
       author_id: req.user.id,
-      content,
+      content: content || '',
       media_url: mediaUrl || null,
       media_type: mediaType || 'text',
       vibe_category: vibeCategory || 'General',
@@ -94,7 +96,7 @@ router.post('/', authMiddleware, async (req, res) => {
         `INSERT INTO posts 
           (id, author_id, content, media_url, media_type, vibe_category, lat, lng, location_name) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [postId, req.user.id, content, mediaUrl, mediaType, vibeCategory, lat, lng, locationName]
+        [postId, req.user.id, content || '', mediaUrl, mediaType, vibeCategory, lat, lng, locationName]
       );
     } else {
       const store = dbService.getMockStore();
@@ -136,6 +138,27 @@ router.post('/:id/like', authMiddleware, async (req, res) => {
         // Like post
         await dbService.query('INSERT INTO likes (user_id, post_id) VALUES ($1, $2)', [req.user.id, postId]);
         await dbService.query('UPDATE posts SET likes_count = likes_count + 1 WHERE id = $1', [postId]);
+
+        // Trigger notification
+        const postRes = await dbService.query('SELECT author_id, content FROM posts WHERE id = $1', [postId]);
+        if (postRes.rows.length > 0) {
+          const postAuthor = postRes.rows[0].author_id;
+          const contentPreview = postRes.rows[0].content ? postRes.rows[0].content.substring(0, 80) : '';
+          
+          if (postAuthor !== req.user.id) {
+            const notifCheck = await dbService.query(
+              'SELECT id FROM notifications WHERE receiver_id = $1 AND sender_id = $2 AND type = $3 AND target_id = $4',
+              [postAuthor, req.user.id, 'like', postId]
+            );
+            if (notifCheck.rows.length === 0) {
+              await dbService.query(
+                `INSERT INTO notifications (receiver_id, sender_id, type, target_id, content_preview) 
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [postAuthor, req.user.id, 'like', postId, contentPreview]
+              );
+            }
+          }
+        }
         return res.json({ liked: true, likes_count: 'incremented' });
       }
     } else {
@@ -154,6 +177,20 @@ router.post('/:id/like', authMiddleware, async (req, res) => {
         // Like post
         post.liked_by.push(req.user.id);
         post.likes_count += 1;
+
+        if (post.author_id !== req.user.id) {
+          store.notifications = store.notifications || [];
+          store.notifications.push({
+            id: `n_${Date.now()}`,
+            receiver_id: post.author_id,
+            sender_id: req.user.id,
+            type: 'like',
+            target_id: postId,
+            content_preview: post.content ? post.content.substring(0, 80) : '',
+            is_read: false,
+            created_at: new Date().toISOString()
+          });
+        }
         return res.json({ liked: true, likes_count: post.likes_count });
       }
     }
@@ -215,6 +252,19 @@ router.post('/:id/comments', authMiddleware, async (req, res) => {
         [commentId, postId, req.user.id, parentId || null, content]
       );
       await dbService.query('UPDATE posts SET comments_count = comments_count + 1 WHERE id = $1', [postId]);
+
+      // Create notification
+      const postRes = await dbService.query('SELECT author_id FROM posts WHERE id = $1', [postId]);
+      if (postRes.rows.length > 0) {
+        const postAuthor = postRes.rows[0].author_id;
+        if (postAuthor !== req.user.id) {
+          await dbService.query(
+            `INSERT INTO notifications (receiver_id, sender_id, type, target_id, content_preview) 
+             VALUES ($1, $2, $3, $4, $5)`,
+            [postAuthor, req.user.id, 'comment', postId, content.substring(0, 85)]
+          );
+        }
+      }
     } else {
       const store = dbService.getMockStore();
       const profile = store.profiles[req.user.id] || {};
@@ -230,7 +280,23 @@ router.post('/:id/comments', authMiddleware, async (req, res) => {
       store.comments[postId].push(enrichedComment);
       
       const post = store.posts.find(p => p.id === postId);
-      if (post) post.comments_count += 1;
+      if (post) {
+        post.comments_count += 1;
+
+        if (post.author_id !== req.user.id) {
+          store.notifications = store.notifications || [];
+          store.notifications.push({
+            id: `n_${Date.now()}`,
+            receiver_id: post.author_id,
+            sender_id: req.user.id,
+            type: 'comment',
+            target_id: postId,
+            content_preview: content.substring(0, 85),
+            is_read: false,
+            created_at: new Date().toISOString()
+          });
+        }
+      }
     }
 
     res.status(201).json({

@@ -152,6 +152,7 @@ const chatRoutes = require('./routes/chat');
 const aiRoutes = require('./routes/ai');
 const communitiesRoutes = require('./routes/communities');
 const gamificationRoutes = require('./routes/gamification');
+const notificationsRoutes = require('./routes/notifications');
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/posts', postsRoutes);
@@ -161,6 +162,7 @@ app.use('/api/v1/chats', chatRoutes);
 app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/communities', communitiesRoutes);
 app.use('/api/v1/gamification', gamificationRoutes);
+app.use('/api/v1/notifications', notificationsRoutes);
 
 // ------------------------------------------------------------------------------
 // GLOBAL EXCEPTION & FALLBACK MIDDLEWARES
@@ -172,12 +174,8 @@ app.use((req, res, next) => {
 });
 
 // Global Error Handler
-app.use((err, req, res, next) => {
-  console.error('[Error Boundary]', err.stack || err.message);
-  res.status(err.status || 500).json({
-    error: err.message || 'A critical server exception occurred.'
-  });
-});
+const errorHandler = require('./middleware/errorHandler');
+app.use(errorHandler);
 
 // Start the HTTP Listening Server
 server.listen(PORT, '0.0.0.0', () => {

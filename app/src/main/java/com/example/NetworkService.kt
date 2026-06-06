@@ -48,7 +48,43 @@ data class BackendPost(
 
 data class CreatePostRequest(
   val content: String,
-  @Json(name = "vibeCategory") val vibeCategory: String
+  @Json(name = "vibeCategory") val vibeCategory: String,
+  @Json(name = "mediaUrl") val mediaUrl: String? = null,
+  @Json(name = "mediaType") val mediaType: String? = null
+)
+
+data class BackendComment(
+  val id: String,
+  @Json(name = "post_id") val postId: String,
+  @Json(name = "author_id") val authorId: String?,
+  @Json(name = "parent_id") val parentId: String? = null,
+  val content: String,
+  @Json(name = "created_at") val createdAt: String?,
+  @Json(name = "display_name") val displayName: String?,
+  val username: String?,
+  @Json(name = "avatar_url") val avatarUrl: String?
+)
+
+data class CreateCommentRequest(
+  val content: String,
+  @Json(name = "parentId") val parentId: String? = null
+)
+
+data class BackendNotification(
+  val id: String,
+  @Json(name = "receiver_id") val receiverId: String,
+  @Json(name = "sender_id") val senderId: String? = null,
+  val type: String,
+  @Json(name = "target_id") val targetId: String? = null,
+  @Json(name = "is_read") val isRead: Boolean = false,
+  @Json(name = "content_preview") val contentPreview: String? = null,
+  @Json(name = "created_at") val createdAt: String? = null,
+  @Json(name = "sender_username") val senderUsername: String? = null,
+  @Json(name = "sender_display_name") val senderDisplayName: String? = null,
+  @Json(name = "sender_avatar_url") val senderAvatarUrl: String? = null,
+  @Json(name = "post_content") val postContent: String? = null,
+  @Json(name = "post_media_url") val postMediaUrl: String? = null,
+  @Json(name = "post_media_type") val postMediaType: String? = null
 )
 
 data class BackendLikeResponse(
@@ -174,6 +210,18 @@ interface SafariSphereApi {
 
   @POST("posts/{id}/like")
   suspend fun likePost(@Path("id") id: String): BackendLikeResponse
+
+  @GET("posts/{id}/comments")
+  suspend fun getComments(@Path("id") id: String): List<BackendComment>
+
+  @POST("posts/{id}/comments")
+  suspend fun createComment(@Path("id") id: String, @Body body: CreateCommentRequest): Map<String, Any>
+
+  @GET("notifications")
+  suspend fun getNotifications(): List<BackendNotification>
+
+  @POST("notifications/mark-read")
+  suspend fun markNotificationsRead(): Map<String, Any>
 
   @GET("chats")
   suspend fun getChats(): List<BackendChat>

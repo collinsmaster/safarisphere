@@ -23,9 +23,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
@@ -76,7 +83,10 @@ data class MobilePost(
   val vibeCategory: String,
   var likes: Int,
   var hasLiked: Boolean = false,
-  val created: String
+  val created: String,
+  val mediaUrl: String? = null,
+  val mediaType: String? = "text",
+  val commentsCount: Int = 0
 )
 
 data class MobileRoom(
@@ -196,6 +206,127 @@ fun SafariSphereApp() {
     prefs.edit().putInt("user_xp", newXp).apply()
   }
 
+  // General Notification attributes
+  var showNotificationsDialog by remember { mutableStateOf(false) }
+  val notificationsList = remember { mutableStateListOf<BackendNotification>() }
+  var isFetchingNotifications by remember { mutableStateOf(false) }
+
+  // General Comments attributes
+  var activePostForComments by remember { mutableStateOf<MobilePost?>(null) }
+  val commentsListForActivePost = remember { mutableStateListOf<BackendComment>() }
+  var isFetchingComments by remember { mutableStateOf(false) }
+  var typingCommentText by remember { mutableStateOf("") }
+
+  // Compose additions
+  var postMediaUrl by remember { mutableStateOf("") }
+  var postMediaType by remember { mutableStateOf("text") } // "text", "image", "video"
+
+  val loadCommentsForPost: (String) -> Unit = { postId ->
+    scope.launch {
+      isFetchingComments = true
+      try {
+        val comments = NetworkService.api.getComments(postId)
+        commentsListForActivePost.clear()
+        commentsListForActivePost.addAll(comments)
+      } catch (e: Exception) {
+        commentsListForActivePost.clear()
+        commentsListForActivePost.add(
+          BackendComment(
+            id = "c_mock_1",
+            postId = postId,
+            authorId = "u_tester_1",
+            parentId = null,
+            content = "This post captures the true wild digital wilderness! 🌴🌟",
+            createdAt = "5 mins ago",
+            displayName = "Luna Wilde ✨",
+            username = "luna_quest",
+            avatarUrl = ""
+          )
+        )
+      } finally {
+        isFetchingComments = false
+      }
+    }
+  }
+
+  val postComment: (String, String) -> Unit = { postId, text ->
+    if (text.isNotBlank()) {
+      scope.launch {
+        try {
+          NetworkService.api.createComment(postId, CreateCommentRequest(content = text))
+          typingCommentText = ""
+          loadCommentsForPost(postId)
+          val idx = postsList.indexOfFirst { it.id == postId }
+          if (idx != -1) {
+            val post = postsList[idx]
+            postsList[idx] = post.copy(commentsCount = post.commentsCount + 1)
+          }
+          updateUserXp(20)
+        } catch (e: Exception) {
+          val newC = BackendComment(
+            id = "c_${System.currentTimeMillis()}",
+            postId = postId,
+            authorId = "current_user",
+            parentId = null,
+            content = text,
+            createdAt = "Just now",
+            displayName = userNickname,
+            username = userHandle,
+            avatarUrl = ""
+          )
+          commentsListForActivePost.add(newC)
+          typingCommentText = ""
+          val idx = postsList.indexOfFirst { it.id == postId }
+          if (idx != -1) {
+            val post = postsList[idx]
+            postsList[idx] = post.copy(commentsCount = post.commentsCount + 1)
+          }
+        }
+      }
+    }
+  }
+
+  val loadNotificationsFromBackend = {
+    scope.launch {
+      isFetchingNotifications = true
+      try {
+        val notifications = NetworkService.api.getNotifications()
+        notificationsList.clear()
+        notificationsList.addAll(notifications)
+      } catch (e: Exception) {
+        notificationsList.clear()
+        notificationsList.add(
+          BackendNotification(
+            id = "n_mock_1",
+            receiverId = "current_user",
+            senderId = "u_tester_2",
+            type = "like",
+            targetId = postsList.firstOrNull()?.id ?: "p1",
+            isRead = false,
+            createdAt = "5 mins ago",
+            senderUsername = "ranger_zach",
+            senderDisplayName = "Ranger Zach 🏕️",
+            senderAvatarUrl = "",
+            postContent = "Exploring neon sunsets in cyber-desert",
+            postMediaUrl = "https://images.unsplash.com/photo-1546182990-dffeafbe841d?auto=format&fit=crop&w=600&q=80",
+            postMediaType = "image"
+          )
+        )
+      } finally {
+        isFetchingNotifications = false
+      }
+    }
+  }
+
+  val markNotificationsRead = {
+    scope.launch {
+      try {
+        NetworkService.api.markNotificationsRead()
+        loadNotificationsFromBackend()
+      } catch (e: Exception) {}
+    }
+  }
+
   val updateMood: (String, String) -> Unit = { text, emo ->
     userMood = text
     userMoodEmoji = emo
@@ -265,7 +396,10 @@ fun SafariSphereApp() {
               vibeCategory = bp.vibeCategory ?: "Adventurer",
               likes = bp.likesCount ?: 0,
               hasLiked = bp.hasLiked ?: false,
-              created = "Just now"
+              created = "Just now",
+              mediaUrl = bp.mediaUrl,
+              mediaType = bp.mediaType ?: "text",
+              commentsCount = bp.commentsCount ?: 0
             )
           )
         }
@@ -358,8 +492,10 @@ fun SafariSphereApp() {
   }
 
   LaunchedEffect(selectedTab) {
-    if (selectedTab == 2) {
+    if (selectedTab == 2 || selectedTab == 3) {
       loadExplorers()
+    }
+    if (selectedTab == 2) {
       loadChats()
     } else if (selectedTab == 4) {
       loadUserProfile()
@@ -431,6 +567,41 @@ fun SafariSphereApp() {
           }
         },
         actions = {
+          IconButton(
+            onClick = {
+              showNotificationsDialog = true
+              loadNotificationsFromBackend()
+            },
+            modifier = Modifier.testTag("notification_bell_btn")
+          ) {
+            Box {
+              Icon(
+                imageVector = Icons.Default.Notifications,
+                contentDescription = "Notifications",
+                tint = if (notificationsList.any { !it.isRead }) NeonCyan else Color.LightGray,
+                modifier = Modifier.size(24.dp)
+              )
+              val unreadCount = notificationsList.count { !it.isRead }
+              if (unreadCount > 0) {
+                Box(
+                  modifier = Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE71D36))
+                    .align(Alignment.TopEnd)
+                    .offset(x = 2.dp, y = (-2).dp),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(
+                    text = unreadCount.toString(),
+                    color = Color.White,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                }
+              }
+            }
+          }
           IconButton(onClick = { /* Simulated Settings */ }) {
             Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
           }
@@ -553,6 +724,10 @@ fun SafariSphereApp() {
               }
               selectedMoment = mom
               updateUserXp(5)
+            },
+            onCommentClicked = { post ->
+              activePostForComments = post
+              loadCommentsForPost(post.id)
             }
           )
           1 -> RoomsTab(
@@ -614,6 +789,7 @@ fun SafariSphereApp() {
           3 -> DiscoverTab(
             communities = communitiesList,
             explorers = explorersList,
+            posts = postsList,
             onJoinCommunity = { comm ->
               val index = communitiesList.indexOf(comm)
               if (index != -1) {
@@ -667,6 +843,10 @@ fun SafariSphereApp() {
                   selectedTab = 2
                 }
               }
+            },
+            onCommentClicked = { post ->
+              activePostForComments = post
+              loadCommentsForPost(post.id)
             }
           )
           4 -> IdentityTab(
@@ -801,6 +981,101 @@ fun SafariSphereApp() {
                 }
               }
 
+              Spacer(modifier = Modifier.height(14.dp))
+
+              Text(
+                "Attach Cosmos Media:",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+              )
+
+              Spacer(modifier = Modifier.height(6.dp))
+
+              // Row of media types
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                listOf(
+                  Triple("text", "📝 Text only", Color.Gray),
+                  Triple("image", "📷 Add Photo", Color(0xFF4CAF50)),
+                  Triple("video", "🎥 Add Video", Color(0xFF2196F3))
+                ).forEach { (type, label, color) ->
+                  Surface(
+                    modifier = Modifier
+                      .weight(1f)
+                      .clickable { postMediaType = type },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (postMediaType == type) color.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.04f),
+                    border = BorderStroke(
+                      width = 1.dp,
+                      color = if (postMediaType == type) color else Color.Transparent
+                    )
+                  ) {
+                    Box(modifier = Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
+                      Text(label, color = if (postMediaType == type) Color.White else Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                  }
+                }
+              }
+
+              if (postMediaType != "text") {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                  value = postMediaUrl,
+                  onValueChange = { postMediaUrl = it },
+                  placeholder = { Text(if (postMediaType == "image") "Paste online image URL..." else "Paste online .mp4 video URL...", color = Color.Gray, fontSize = 12.sp) },
+                  colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                  ),
+                  modifier = Modifier.fillMaxWidth().height(52.dp).testTag("post_media_url_input"),
+                  textStyle = TextStyle(fontSize = 12.sp)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Quick Presets
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(6.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("Quick Presets:", color = Color.Gray, fontSize = 10.sp)
+                  if (postMediaType == "image") {
+                    listOf(
+                      Pair("🦁 Lion", "https://images.unsplash.com/photo-1546182990-dffeafbe841d?auto=format&fit=crop&w=600&q=80"),
+                      Pair("🐆 Cheetah", "https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=600&q=80")
+                    ).forEach { (caption, url) ->
+                      Surface(
+                        modifier = Modifier.clickable { postMediaUrl = url },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White.copy(alpha = 0.08f)
+                      ) {
+                        Text(caption, color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                      }
+                    }
+                  } else {
+                    listOf(
+                      Pair("🎥 Safari Clip", "https://assets.mixkit.co/videos/preview/mixkit-safari-expedition-jeep-on-trail-43187-large.mp4"),
+                      Pair("🌊 Oasis Lake", "https://assets.mixkit.co/videos/preview/mixkit-waves-crashing-on-a-beach-from-above-41553-large.mp4")
+                    ).forEach { (caption, url) ->
+                      Surface(
+                        modifier = Modifier.clickable { postMediaUrl = url },
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.White.copy(alpha = 0.08f)
+                      ) {
+                        Text(caption, color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                      }
+                    }
+                  }
+                }
+              }
+
               Spacer(modifier = Modifier.height(20.dp))
 
               Row(
@@ -811,10 +1086,10 @@ fun SafariSphereApp() {
                   onClick = {
                     // Quick SphereMate AI auto-caption recommendation helper based on active category
                     newPostContent = when (activeCategory) {
-                      "Adventurer" -> "Stalking digital gold and neon sunsets on this cyber-expedition! 🐆🌾 #wilderness #adventure"
-                      "Acoustics" -> "Vibing to the rhythmic tribal frequencies of midnight lo-fi synths. 🥁🎹 #synth #acoustic"
-                      "Dreamer" -> "Floating in celestial digital clouds, dreaming of the solar savanna. ☁️☄️ #dreamer #neon"
-                      else -> "Exploring the neon sun horizon under a clear $activeCategory vibe. 🌅✨ #wilderness"
+                      "Adventurer" -> "Stalking digital gold and neon sunsets on this cyber-expedition! 🐆🌾 *wilderness *adventure"
+                      "Acoustics" -> "Vibing to the rhythmic tribal frequencies of midnight lo-fi synths. 🥁🎹 *synth *acoustic"
+                      "Dreamer" -> "Floating in celestial digital clouds, dreaming of the solar savanna. ☁️☄️ *dreamer *neon"
+                      else -> "Exploring the neon sun horizon under a clear $activeCategory vibe. 🌅✨ *wilderness"
                     }
                   },
                   colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF9C4FFF))
@@ -835,17 +1110,27 @@ fun SafariSphereApp() {
 
                 Button(
                   onClick = {
-                    if (newPostContent.isNotBlank()) {
+                    if (newPostContent.isNotBlank() || (postMediaType != "text" && postMediaUrl.isNotBlank())) {
                       val contentToSend = newPostContent
                       val categoryToSend = activeCategory
+                      val attachmentUrl = if (postMediaType != "text") postMediaUrl else null
+                      val attachmentType = postMediaType
+
                       newPostContent = ""
                       showNewPostSheet = false
 
                       scope.launch {
                         try {
                           NetworkService.api.createPost(
-                            CreatePostRequest(content = contentToSend, vibeCategory = categoryToSend)
+                            CreatePostRequest(
+                              content = contentToSend,
+                              vibeCategory = categoryToSend,
+                              mediaUrl = attachmentUrl,
+                              mediaType = attachmentType
+                            )
                           )
+                          postMediaUrl = ""
+                          postMediaType = "text"
                           loadPostsFromBackend()
                         } catch (e: Exception) {
                           // Local offline fallback
@@ -858,8 +1143,13 @@ fun SafariSphereApp() {
                             vibeCategory = categoryToSend,
                             likes = 0,
                             hasLiked = false,
-                            created = "Just now"
+                            created = "Just now",
+                            mediaUrl = attachmentUrl,
+                            mediaType = attachmentType,
+                            commentsCount = 0
                           )
+                          postMediaUrl = ""
+                          postMediaType = "text"
                           postsList.add(0, p)
                         }
                         updateUserXp(40)
@@ -869,6 +1159,454 @@ fun SafariSphereApp() {
                   colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9F1C), contentColor = Color.Black)
                 ) {
                   Text("Post", fontWeight = FontWeight.Bold)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // ============================================================================
+      // 🌟 DYNAMIC MODERN NOTIFICATIONS DRAWER OVERLAY
+      // ============================================================================
+      if (showNotificationsDialog) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.82f))
+            .clickable { showNotificationsDialog = false },
+          contentAlignment = Alignment.Center
+        ) {
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth(0.92f)
+              .fillMaxHeight(0.85f)
+              .clickable(enabled = false) {},
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF13131A),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+          ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+              // Notification Header
+              Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Column {
+                  Text(
+                    "Cosmic Activity",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                  Text(
+                    "Tracks likes and comments on your vibes",
+                    color = Color.Gray,
+                    fontSize = 11.sp
+                  )
+                }
+                IconButton(onClick = { showNotificationsDialog = false }) {
+                  Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                }
+              }
+
+              // Divider
+              HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+              Spacer(modifier = Modifier.height(10.dp))
+
+              // Action Bar
+              Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.End
+              ) {
+                TextButton(
+                  onClick = { markNotificationsRead() },
+                  colors = ButtonDefaults.textButtonColors(contentColor = NeonCyan)
+                ) {
+                  Text("Mark all as read", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+              }
+
+              // Notification List Content
+              if (isFetchingNotifications) {
+                // Shimmer notifications list
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                  items(4) {
+                    Row(
+                      modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      ShimmerPlaceholder(modifier = Modifier.size(38.dp), shape = CircleShape)
+                      Spacer(modifier = Modifier.width(12.dp))
+                      Column(modifier = Modifier.weight(1f)) {
+                        ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.8f).height(10.dp))
+                      }
+                      Spacer(modifier = Modifier.width(12.dp))
+                      ShimmerPlaceholder(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(6.dp))
+                    }
+                  }
+                }
+              } else if (notificationsList.isEmpty()) {
+                Box(
+                  modifier = Modifier.fillMaxSize().weight(1f),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🌌", fontSize = 38.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Deep Space Serenity", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("No social engagements caught in your orbit yet.", color = Color.Gray, fontSize = 11.sp, textAlign = TextAlign.Center)
+                  }
+                }
+              } else {
+                LazyColumn(
+                  modifier = Modifier.weight(1f),
+                  verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                  items(notificationsList) { notif ->
+                    Row(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (notif.isRead) Color.White.copy(alpha = 0.02f) else Color.White.copy(alpha = 0.06f))
+                        .border(
+                          width = 1.dp,
+                          color = if (notif.isRead) Color.Transparent else NeonCyan.copy(alpha = 0.2f),
+                          shape = RoundedCornerShape(14.dp)
+                        )
+                        .clickable {
+                          showNotificationsDialog = false
+                          selectedTab = 0
+                          val matchingPost = postsList.find { it.id == notif.targetId }
+                          if (matchingPost != null) {
+                            activePostForComments = matchingPost
+                            loadCommentsForPost(matchingPost.id)
+                          }
+                          scope.launch {
+                            try {
+                              if (!notif.isRead) {
+                                NetworkService.api.markNotificationsRead()
+                                loadNotificationsFromBackend()
+                              }
+                            } catch (e: Exception) {}
+                          }
+                        }
+                        .padding(12.dp),
+                      verticalAlignment = Alignment.CenterVertically
+                    ) {
+                      Box(
+                        modifier = Modifier
+                          .size(38.dp)
+                          .clip(CircleShape)
+                          .background(Color.White.copy(alpha = 0.05f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        Text(if (notif.type == "like") "❤️" else "💬", fontSize = 16.sp)
+                      }
+
+                      Spacer(modifier = Modifier.width(12.dp))
+
+                      Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                          text = notif.senderDisplayName ?: "Someone",
+                          color = Color.White,
+                          fontSize = 13.sp,
+                          fontWeight = FontWeight.Bold
+                        )
+                        val textAction = if (notif.type == "like") "liked your post:" else "commented on your post:"
+                        Text(
+                          text = "$textAction \"${notif.contentPreview ?: ""}\"",
+                          color = Color.LightGray,
+                          fontSize = 11.sp,
+                          maxLines = 2,
+                          overflow = TextOverflow.Ellipsis
+                        )
+                      }
+
+                      Spacer(modifier = Modifier.width(8.dp))
+
+                      if (!notif.postMediaUrl.isNullOrBlank()) {
+                        Box(
+                          modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black)
+                        ) {
+                          AsyncImage(
+                            model = notif.postMediaUrl,
+                            contentDescription = "Post Thumbnail Preview",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                          )
+                        }
+                      } else {
+                        Box(
+                          modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.04f)),
+                          contentAlignment = Alignment.Center
+                        ) {
+                          Text("📝", fontSize = 14.sp)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // ============================================================================
+      // 🌟 DIGITAL CORRIDORS RICH COMMENTS SHEET OVERLAY (THREADED & GALAXY SHIMMER)
+      // ============================================================================
+      if (activePostForComments != null) {
+        val post = activePostForComments!!
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { activePostForComments = null },
+          contentAlignment = Alignment.Center
+        ) {
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth(0.94f)
+              .fillMaxHeight(0.85f)
+              .clickable(enabled = false) {},
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF13131A),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+          ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+              Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text(
+                    "Sphere Comments",
+                    color = NeonCyan,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(10.dp))
+                      .background(NeonCyan.copy(alpha = 0.15f))
+                      .padding(horizontal = 6.dp, vertical = 2.dp)
+                  ) {
+                    Text(
+                      post.commentsCount.toString(),
+                      color = NeonCyan,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                  }
+                }
+                IconButton(onClick = { activePostForComments = null }) {
+                  Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                }
+              }
+
+              HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+              Spacer(modifier = Modifier.height(8.dp))
+
+              // Context Header
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(Color.White.copy(alpha = 0.03f))
+                  .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = 0.1f)),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text("🦁", fontSize = 14.sp)
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(post.author, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  Text(post.content, color = Color.LightGray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+              }
+
+              Spacer(modifier = Modifier.height(12.dp))
+
+              if (isFetchingComments) {
+                LazyColumn(
+                  modifier = Modifier.weight(1f),
+                  verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                  items(3) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                      ShimmerPlaceholder(modifier = Modifier.size(32.dp), shape = CircleShape)
+                      Spacer(modifier = Modifier.width(10.dp))
+                      Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                          ShimmerPlaceholder(modifier = Modifier.width(80.dp).height(12.dp))
+                          Spacer(modifier = Modifier.width(8.dp))
+                          ShimmerPlaceholder(modifier = Modifier.width(40.dp).height(10.dp))
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(14.dp))
+                      }
+                    }
+                  }
+                }
+              } else if (commentsListForActivePost.isEmpty()) {
+                Box(
+                  modifier = Modifier.weight(1f).fillMaxWidth(),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("📣", fontSize = 32.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("No frequencies detected yet", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text("Be the first to chime in!", color = Color.Gray, fontSize = 11.sp)
+                  }
+                }
+              } else {
+                LazyColumn(
+                  modifier = Modifier.weight(1f),
+                  verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                  val parentComments = commentsListForActivePost.filter { it.parentId == null }
+                  items(parentComments) { pComm ->
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                      Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Box(
+                          modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.05f)),
+                          contentAlignment = Alignment.Center
+                        ) {
+                          Text("🦁", fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                          Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                          ) {
+                            Text(pComm.displayName ?: pComm.username ?: "Pioneer", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(pComm.createdAt ?: "Just now", color = Color.Gray, fontSize = 10.sp)
+                          }
+                          Text(pComm.content, color = Color(0xFFECEFF1), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                        }
+                      }
+
+                      val subComments = commentsListForActivePost.filter { it.parentId == pComm.id }
+                      subComments.forEach { subComm ->
+                        Row(
+                          modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 24.dp, top = 6.dp, bottom = 4.dp)
+                            .background(Color.White.copy(alpha = 0.02f))
+                            .border(BorderStroke(1.dp, NeonCyan.copy(alpha = 0.1f)), RoundedCornerShape(10.dp))
+                            .padding(8.dp)
+                        ) {
+                          Box(
+                            modifier = Modifier
+                              .size(24.dp)
+                              .clip(CircleShape)
+                              .background(Color.White.copy(alpha = 0.05f)),
+                            contentAlignment = Alignment.Center
+                          ) {
+                            Text("🐆", fontSize = 10.sp)
+                          }
+                          Spacer(modifier = Modifier.width(8.dp))
+                          Column {
+                            Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              modifier = Modifier.fillMaxWidth()
+                            ) {
+                              Text(subComm.displayName ?: subComm.username ?: "Explorer", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                              Text(subComm.createdAt ?: "Just now", color = Color.Gray, fontSize = 9.sp)
+                            }
+                            Text(subComm.content, color = Color(0xFFECEFF1), fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+
+              Spacer(modifier = Modifier.height(10.dp))
+
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(16.dp))
+                  .background(Color.Black.copy(alpha = 0.4f))
+                  .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(16.dp))
+                  .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                listOf("🦁", "🔥", "✨").forEach { emoji ->
+                  Box(
+                    modifier = Modifier
+                      .size(28.dp)
+                      .clip(CircleShape)
+                      .clickable { typingCommentText += emoji }
+                      .padding(2.dp),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Text(emoji, fontSize = 14.sp)
+                  }
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                BasicTextField(
+                  value = typingCommentText,
+                  onValueChange = { typingCommentText = it },
+                  textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                  modifier = Modifier
+                    .weight(1f)
+                    .testTag("comment_input_text")
+                    .padding(vertical = 8.dp),
+                  decorationBox = { innerTextField ->
+                    if (typingCommentText.isEmpty()) {
+                      Text("Beam your thoughts...", color = Color.Gray, fontSize = 13.sp)
+                    }
+                    innerTextField()
+                  }
+                )
+
+                IconButton(
+                  onClick = {
+                    if (typingCommentText.isNotBlank()) {
+                      postComment(post.id, typingCommentText)
+                    }
+                  },
+                  modifier = Modifier.testTag("submit_comment_btn")
+                ) {
+                  Icon(
+                    imageVector = Icons.Default.Send,
+                    contentDescription = "Send Comment",
+                    tint = NeonCyan,
+                    modifier = Modifier.size(18.dp)
+                  )
                 }
               }
             }
@@ -889,7 +1627,8 @@ fun FeedTab(
   moments: List<MobileMoment>,
   posts: List<MobilePost>,
   onLikeClicked: (MobilePost) -> Unit,
-  onMomentClicked: (MobileMoment) -> Unit
+  onMomentClicked: (MobileMoment) -> Unit,
+  onCommentClicked: (MobilePost) -> Unit
 ) {
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -1284,6 +2023,91 @@ fun FeedTab(
             lineHeight = 20.sp
           )
 
+          if (!post.mediaUrl.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            if (post.mediaType == "video") {
+              // Video Player Mock card
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(180.dp)
+                  .clip(RoundedCornerShape(16.dp))
+                  .background(Color.Black)
+                  .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center
+              ) {
+                val videoThumbnail = if (!post.mediaUrl.contains("mixkit")) {
+                  post.mediaUrl
+                } else {
+                  "https://images.unsplash.com/photo-1547407139-3c921a66005c?auto=format&fit=crop&w=600&q=80"
+                }
+                AsyncImage(
+                  model = videoThumbnail,
+                  contentDescription = "Video Thumbnail",
+                  modifier = Modifier.fillMaxSize().alpha(0.6f),
+                  contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+
+                var isPlaying by remember { mutableStateOf(false) }
+                Surface(
+                  modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .clickable { isPlaying = !isPlaying }
+                    .border(2.dp, NeonCyan, CircleShape),
+                  color = Color.Black.copy(alpha = 0.6f)
+                ) {
+                  Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                      imageVector = if (isPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
+                      contentDescription = if (isPlaying) "Pause" else "Play",
+                      tint = NeonCyan,
+                      modifier = Modifier.size(24.dp)
+                    )
+                  }
+                }
+
+                if (isPlaying) {
+                  Box(
+                    modifier = Modifier
+                      .fillMaxSize()
+                      .background(Brush.radialGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f))))
+                      .border(2.dp, NeonCyan, RoundedCornerShape(16.dp))
+                  ) {
+                    Text(
+                      "🛰️ FEED VIDEO LIVE CHIME",
+                      color = NeonCyan,
+                      fontSize = 8.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                    )
+                    LinearProgressIndicator(
+                      color = NeonCyan,
+                      trackColor = Color.White.copy(alpha = 0.1f),
+                      modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomCenter)
+                    )
+                  }
+                }
+              }
+            } else {
+              // Image card load via AsyncImage
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(180.dp)
+                  .clip(RoundedCornerShape(16.dp))
+                  .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+              ) {
+                AsyncImage(
+                  model = post.mediaUrl,
+                  contentDescription = "Post Media Image Attachment",
+                  modifier = Modifier.fillMaxSize(),
+                  contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+              }
+            }
+          }
+
           Spacer(modifier = Modifier.height(14.dp))
 
           // Footer Metrics Buttons
@@ -1324,16 +2148,24 @@ fun FeedTab(
               Text("3", color = Color(0xFF90A4AE), fontSize = 12.sp)
             }
 
-            // Comments mockup
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Fully Functional Comments button triggering comments detail corridors!
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.clickable { onCommentClicked(post) },
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
               Icon(
-                imageVector = Icons.Default.Menu,
+                imageVector = Icons.Default.MailOutline,
                 contentDescription = "Comments",
-                tint = Color(0xFF90A4AE),
-                modifier = Modifier.size(18.dp)
+                tint = NeonCyan,
+                modifier = Modifier.size(18.dp).testTag("post_comment_btn_${post.id}")
               )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text("5", color = Color(0xFF90A4AE), fontSize = 12.sp)
+              Text(
+                post.commentsCount.toString(),
+                color = Color(0xFF90A4AE),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+              )
             }
           }
         }
@@ -1927,11 +2759,22 @@ fun AICompanionTab(
 fun DiscoverTab(
   communities: List<MobileCommunity>,
   explorers: List<BackendExplorer>,
+  posts: List<MobilePost>,
   onJoinCommunity: (MobileCommunity) -> Unit,
-  onInitiateDM: (BackendExplorer) -> Unit
+  onInitiateDM: (BackendExplorer) -> Unit,
+  onCommentClicked: (MobilePost) -> Unit
 ) {
   var searchQuery by remember { mutableStateOf("") }
   var selectedExplorerForProfile by remember { mutableStateOf<BackendExplorer?>(null) }
+
+  var isSearchingMockLoading by remember { mutableStateOf(false) }
+  LaunchedEffect(searchQuery) {
+    if (searchQuery.trim().isNotEmpty()) {
+      isSearchingMockLoading = true
+      kotlinx.coroutines.delay(400) // fast mock galaxy processing delay
+      isSearchingMockLoading = false
+    }
+  }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -2025,6 +2868,17 @@ fun DiscoverTab(
       }
     }
 
+    val filteredPosts = if (searchQuery.trim().isEmpty()) {
+      emptyList()
+    } else {
+      posts.filter {
+        it.content.contains(searchQuery, ignoreCase = true) ||
+        it.author.contains(searchQuery, ignoreCase = true) ||
+        it.username.contains(searchQuery, ignoreCase = true) ||
+        it.vibeCategory.contains(searchQuery, ignoreCase = true)
+      }
+    }
+
     item {
       Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -2081,6 +2935,140 @@ fun DiscoverTab(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                   )
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (searchQuery.trim().isNotEmpty()) {
+      if (isSearchingMockLoading) {
+        // Render 2 awesome post skeleton loaders
+        items(2) {
+          Surface(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            color = GlassyCard,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                ShimmerPlaceholder(modifier = Modifier.size(40.dp), shape = CircleShape)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                  ShimmerPlaceholder(modifier = Modifier.width(120.dp).height(12.dp))
+                  Spacer(modifier = Modifier.height(6.dp))
+                  ShimmerPlaceholder(modifier = Modifier.width(80.dp).height(10.dp))
+                }
+              }
+              Spacer(modifier = Modifier.height(14.dp))
+              ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(16.dp))
+              Spacer(modifier = Modifier.height(8.dp))
+              ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.8f).height(14.dp))
+            }
+          }
+        }
+      } else {
+        // Matched Post section header
+        item {
+          Text(
+            "Matched Cosmic Posts (${filteredPosts.size})",
+            color = Color(0xFFFF9F1C),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 8.dp)
+          )
+        }
+
+        if (filteredPosts.isEmpty()) {
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = Color.White.copy(alpha = 0.02f),
+              shape = RoundedCornerShape(16.dp)
+            ) {
+              Box(modifier = Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No matching posts drifting in this sphere.", color = Color.Gray, fontSize = 11.sp)
+              }
+            }
+          }
+        } else {
+          items(filteredPosts) { post ->
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(24.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Box(
+                    modifier = Modifier
+                      .size(36.dp)
+                      .clip(CircleShape)
+                      .background(Color.White.copy(alpha = 0.05f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Text("🦁", fontSize = 16.sp)
+                  }
+                  Spacer(modifier = Modifier.width(10.dp))
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(post.author, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("@${post.username} • ${post.created}", color = Color.Gray, fontSize = 11.sp)
+                  }
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(8.dp))
+                      .background(NeonCyan.copy(alpha = 0.15f))
+                      .padding(horizontal = 8.dp, vertical = 2.dp)
+                  ) {
+                    Text(post.vibeCategory, color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(post.content, color = Color(0xFFECEFF1), fontSize = 13.sp)
+
+                if (!post.mediaUrl.isNullOrBlank()) {
+                  Spacer(modifier = Modifier.height(10.dp))
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(130.dp)
+                      .clip(RoundedCornerShape(12.dp))
+                  ) {
+                    AsyncImage(
+                      model = post.mediaUrl,
+                      contentDescription = "Search Post Attachment Overlay",
+                      modifier = Modifier.fillMaxSize(),
+                      contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("❤️ ${post.likes} Likes", color = Color.Gray, fontSize = 11.sp)
+
+                  Surface(
+                    modifier = Modifier.clickable { onCommentClicked(post) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = NeonCyan.copy(alpha = 0.1f)
+                  ) {
+                    Text(
+                      "💬 ${post.commentsCount} Comments",
+                      color = NeonCyan,
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                  }
                 }
               }
             }
@@ -4935,4 +5923,29 @@ fun ValidationChip(
       lineHeight = 12.sp
     )
   }
+}
+
+// Shimmer skeleton loader helper
+@Composable
+fun ShimmerPlaceholder(
+  modifier: Modifier = Modifier,
+  shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp)
+) {
+  val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
+  val alphaState = transition.animateFloat(
+    initialValue = 0.2f,
+    targetValue = 0.6f,
+    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+      animation = androidx.compose.animation.core.tween(durationMillis = 1000, easing = androidx.compose.animation.core.LinearEasing),
+      repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+    ),
+    label = "shimmer_alpha"
+  )
+  val alpha = alphaState.value
+
+  Box(
+    modifier = modifier
+      .clip(shape)
+      .background(Color.White.copy(alpha = alpha))
+  )
 }
