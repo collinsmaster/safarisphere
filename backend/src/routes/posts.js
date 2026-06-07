@@ -214,10 +214,13 @@ router.get('/:id/comments', async (req, res) => {
       comments = commRes.rows;
     } else {
       const store = dbService.getMockStore();
-      comments = store.comments[postId] || [
-        { id: 'c1', post_id: postId, display_name: 'Pioneer Sam', username: 'sam_pioneer', content: 'Incredible shot! Pure magic here.', created_at: new Date().toISOString() },
-        { id: 'c2', post_id: postId, display_name: 'Luna Wilde', username: 'luna_vibe', content: 'Indeed. Absolutely breathtaking.', created_at: new Date().toISOString() }
-      ];
+      if (!store.comments[postId]) {
+        store.comments[postId] = [
+          { id: 'c1', post_id: postId, display_name: 'Pioneer Sam', username: 'sam_pioneer', content: 'Incredible shot! Pure magic here.', created_at: new Date().toISOString(), avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80' },
+          { id: 'c2', post_id: postId, display_name: 'Luna Wilde', username: 'luna_vibe', content: 'Indeed. Absolutely breathtaking.', created_at: new Date().toISOString(), avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80' }
+        ];
+      }
+      comments = store.comments[postId];
     }
 
     res.json(comments);
@@ -276,7 +279,12 @@ router.post('/:id/comments', authMiddleware, async (req, res) => {
         avatar_url: profile.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80'
       };
 
-      if (!store.comments[postId]) store.comments[postId] = [];
+      if (!store.comments[postId]) {
+        store.comments[postId] = [
+          { id: 'c1', post_id: postId, display_name: 'Pioneer Sam', username: 'sam_pioneer', content: 'Incredible shot! Pure magic here.', created_at: new Date().toISOString(), avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80' },
+          { id: 'c2', post_id: postId, display_name: 'Luna Wilde', username: 'luna_vibe', content: 'Indeed. Absolutely breathtaking.', created_at: new Date().toISOString(), avatar_url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80' }
+        ];
+      }
       store.comments[postId].push(enrichedComment);
       
       const post = store.posts.find(p => p.id === postId);

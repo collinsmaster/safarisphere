@@ -530,6 +530,7 @@ fun SafariSphereApp() {
         
         postsList.clear()
         postsList.addAll(mergedPosts)
+        saveAllPostsToLocalStorage(context, mergedPosts)
       } catch (e: Exception) {
         if (postsList.isEmpty()) {
           postsList.addAll(localPosts)
@@ -2212,8 +2213,10 @@ fun SafariSphereApp() {
 
               IconButton(
                 onClick = {
-                  if (typingCommentText.isNotBlank()) {
-                    postComment(post.id, typingCommentText)
+                  if (typingCommentText.isNotBlank() && !isPostingComment) {
+                    val textToPost = typingCommentText
+                    typingCommentText = ""
+                    postComment(post.id, textToPost)
                   }
                 },
                 enabled = !isPostingComment,
@@ -5510,6 +5513,17 @@ fun BentoAuthScreen(
   val context = androidx.compose.ui.platform.LocalContext.current
   var isLoading by remember { mutableStateOf(false) }
 
+  // Forgot password flow states
+  var showForgotPassword by remember { mutableStateOf(false) }
+  var forgotPasswordStep by remember { mutableStateOf(1) } // 1: Enter identity, 2: Verify OTP, 3: Set new password
+  var forgotIdentityInput by remember { mutableStateOf("") }
+  var forgotOtpInput by remember { mutableStateOf("") }
+  var forgotNewPasswordInput by remember { mutableStateOf("") }
+  var forgotConfirmPasswordInput by remember { mutableStateOf("") }
+  var forgotErrorMessage by remember { mutableStateOf("") }
+  var forgotSentEmailAddress by remember { mutableStateOf("") }
+  var forgotDebugOtp by remember { mutableStateOf<String?>(null) }
+
   // Shared state
   var isSignUp by remember { mutableStateOf(false) }
   var authErrorMessage by remember { mutableStateOf("") }
@@ -5689,14 +5703,22 @@ fun BentoAuthScreen(
               Spacer(modifier = Modifier.width(16.dp))
               Column(modifier = Modifier.weight(1f)) {
                 Text(
-                  text = if (isSignUp) "Synthesize Profile" else "Safari Gateway",
+                  text = when {
+                    showForgotPassword -> "Restore Passphrase"
+                    isSignUp -> "Synthesize Profile"
+                    else -> "Safari Gateway"
+                  },
                   color = Color.White,
                   fontWeight = FontWeight.ExtraBold,
                   fontSize = 20.sp,
                   letterSpacing = (-0.5).sp
                 )
                 Text(
-                  text = if (isSignUp) "Configure secure credentials for Pioneer." else "Sign in to enter the social sphere.",
+                  text = when {
+                    showForgotPassword -> "Dispatching secure recovery frequencies."
+                    isSignUp -> "Configure secure credentials for Pioneer."
+                    else -> "Sign in to enter the social sphere."
+                  },
                   color = Color.Gray,
                   fontSize = 12.sp
                 )
@@ -5712,7 +5734,373 @@ fun BentoAuthScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            if (!isSignUp) {
+            if (showForgotPassword) {
+              // ================= FORGOT PASSWORD LAYOUT =================
+              when (forgotPasswordStep) {
+                1 -> {
+                  // Step 1: Input Identity (Username or Email)
+                  Text(
+                    text = "Enter Explorer Username or Email",
+                    color = Color.LightGray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                  )
+                  OutlinedTextField(
+                    value = forgotIdentityInput,
+                    onValueChange = { forgotIdentityInput = it },
+                    placeholder = { Text("e.g. pioneer_prime or princemaster@gmail.com", color = Color.Gray, fontSize = 13.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedBorderColor = NeonCyan,
+                      unfocusedBorderColor = Color.DarkGray,
+                      focusedTextColor = Color.White,
+                      unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("forgot_identity_input"),
+                    singleLine = true
+                  )
+
+                  if (forgotErrorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                      text = forgotErrorMessage,
+                      color = DangerCrimson,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                    
+                    if (forgotErrorMessage.contains("not registered")) {
+                      Spacer(modifier = Modifier.height(8.dp))
+                      Button(
+                        onClick = {
+                          isSignUp = true
+                          showForgotPassword = false
+                          authErrorMessage = ""
+                          if (forgotIdentityInput.contains("@")) {
+                            emailInput = forgotIdentityInput
+                          } else {
+                            usernameInput = forgotIdentityInput
+                          }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan.copy(alpha = 0.2f), contentColor = NeonCyan),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                      ) {
+                        Text("Create a new Pioneer Profile", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                      }
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(20.dp))
+
+                  Button(
+                    onClick = {
+                      if (isLoading) return@Button
+                      if (forgotIdentityInput.isEmpty()) {
+                        forgotErrorMessage = "Please type your account username or email."
+                        return@Button
+                      }
+                      forgotErrorMessage = ""
+                      isLoading = true
+                      scope.launch {
+                        try {
+                          val response = NetworkService.api.forgotPassword(mapOf("usernameOrEmail" to forgotIdentityInput.trim()))
+                          forgotSentEmailAddress = response["email"] as? String ?: forgotIdentityInput.trim()
+                          forgotDebugOtp = response["debugOtp"] as? String
+                          forgotPasswordStep = 2
+                        } catch (e: Exception) {
+                          val msg = e.message ?: ""
+                          if (msg.contains("404")) {
+                            forgotErrorMessage = "This account username or email is not registered. Would you like to create an account?"
+                          } else {
+                            forgotErrorMessage = "Database connect failure. Retrying frequency attunement..."
+                          }
+                        } finally {
+                          isLoading = false
+                        }
+                      }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("forgot_submit_identity_btn")
+                  ) {
+                    if (isLoading) {
+                      CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
+                    } else {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Send, contentDescription = "Send", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Dispatch Verification Code", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                      }
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(14.dp))
+
+                  TextButton(
+                    onClick = { showForgotPassword = false },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                  ) {
+                    Text("Return to Sign In", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                  }
+                }
+                2 -> {
+                  // Step 2: Verification Input
+                  Text(
+                    text = "COSMIC SECURITY VERIFICATION",
+                    color = NeonCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                  )
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Text(
+                    text = "A secure verification code has been dispatched to: $forgotSentEmailAddress",
+                    color = Color.LightGray,
+                    fontSize = 12.sp
+                  )
+
+                  if (forgotDebugOtp != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                      text = "(Telemetry Debug Code: $forgotDebugOtp)",
+                      color = SoftNeonMint,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(16.dp))
+
+                  OutlinedTextField(
+                    value = forgotOtpInput,
+                    onValueChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) forgotOtpInput = it },
+                    placeholder = { Text("Enter 6-digit OTP code", color = Color.Gray) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedBorderColor = NeonCyan,
+                      unfocusedBorderColor = Color.DarkGray,
+                      focusedTextColor = Color.White,
+                      unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("forgot_otp_input"),
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                      keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                    )
+                  )
+
+                  if (forgotErrorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                      text = forgotErrorMessage,
+                      color = DangerCrimson,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(20.dp))
+
+                  val isOtpLengthCompleted = forgotOtpInput.trim().length == 6
+                  Button(
+                    onClick = {
+                      if (!isOtpLengthCompleted) return@Button
+                      forgotErrorMessage = ""
+                      forgotPasswordStep = 3
+                    },
+                    enabled = isOtpLengthCompleted,
+                    colors = ButtonDefaults.buttonColors(
+                      containerColor = SoftNeonMint,
+                      contentColor = Color.Black,
+                      disabledContainerColor = SoftNeonMint.copy(alpha = 0.15f),
+                      disabledContentColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("forgot_otp_verify_btn")
+                  ) {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.Center
+                    ) {
+                      Icon(imageVector = Icons.Default.Check, contentDescription = "Verify", modifier = Modifier.size(18.dp))
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text("Verify Cosmic Recovery Code", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                  }
+
+                  Spacer(modifier = Modifier.height(20.dp))
+
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = NeonCyan, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = "Incorrect address? Change email",
+                      color = NeonCyan,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold,
+                      style = TextStyle(textDecoration = TextDecoration.Underline),
+                      modifier = Modifier.clickable {
+                        forgotPasswordStep = 1
+                        forgotErrorMessage = ""
+                      }
+                    )
+                  }
+                }
+                3 -> {
+                  // Step 3: Change Password
+                  val passLengthOk = forgotNewPasswordInput.length >= 6
+                  val passHasLetter = forgotNewPasswordInput.any { it.isLetter() }
+                  val passHasDigit = forgotNewPasswordInput.any { it.isDigit() }
+                  val passHasSymbol = forgotNewPasswordInput.any { !it.isLetterOrDigit() }
+                  val isPasswordStrong = passLengthOk && passHasLetter && passHasDigit && passHasSymbol
+                  val isConfirmMatch = forgotConfirmPasswordInput == forgotNewPasswordInput && forgotConfirmPasswordInput.isNotEmpty()
+
+                  Text(
+                    text = "ESTABLISH NEW PASSPHRASE",
+                    color = NeonCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                  )
+                  Text(
+                    text = "Input a brand-new strong passphrase below to synthesize security credentials.",
+                    color = Color.Gray,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                  )
+
+                  OutlinedTextField(
+                    value = forgotNewPasswordInput,
+                    onValueChange = { forgotNewPasswordInput = it },
+                    placeholder = { Text("New Passphrase", color = Color.Gray) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedBorderColor = NeonCyan,
+                      unfocusedBorderColor = Color.DarkGray,
+                      focusedTextColor = Color.White,
+                      unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("forgot_new_password_input"),
+                    singleLine = true
+                  )
+
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  OutlinedTextField(
+                    value = forgotConfirmPasswordInput,
+                    onValueChange = { forgotConfirmPasswordInput = it },
+                    placeholder = { Text("Confirm New Passphrase", color = Color.Gray) },
+                    visualTransformation = PasswordVisualTransformation(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                      focusedBorderColor = NeonCyan,
+                      unfocusedBorderColor = Color.DarkGray,
+                      focusedTextColor = Color.White,
+                      unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("forgot_confirm_password_input"),
+                    singleLine = true
+                  )
+
+                  Spacer(modifier = Modifier.height(14.dp))
+
+                  Text("COSMIC SECURITY CHECKS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                  Spacer(modifier = Modifier.height(6.dp))
+                  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val rules = listOf(
+                      Triple(passLengthOk, "At least 6 characters in length", "1"),
+                      Triple(passHasLetter, "Contains alphanumeric alphabetic letters", "2"),
+                      Triple(passHasDigit, "Contains digital numerical parameters", "3"),
+                      Triple(passHasSymbol, "Contains special characters/symbols", "4"),
+                      Triple(true, "NEW: Must not match previous old password", "5")
+                    )
+                    rules.forEach { (ok, ruleLabel, code) ->
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                          imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
+                          contentDescription = "Status",
+                          tint = if (ok) SoftNeonMint else Color.Gray,
+                          modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(ruleLabel, color = if (ok) Color.LightGray else Color.Gray, fontSize = 11.sp)
+                      }
+                    }
+                  }
+
+                  if (forgotErrorMessage.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                      text = forgotErrorMessage,
+                      color = DangerCrimson,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                  }
+
+                  Spacer(modifier = Modifier.height(20.dp))
+
+                  Button(
+                    onClick = {
+                      if (!isPasswordStrong || !isConfirmMatch || isLoading) return@Button
+                      forgotErrorMessage = ""
+                      isLoading = true
+                      scope.launch {
+                        try {
+                          val body = mapOf(
+                            "usernameOrEmail" to forgotIdentityInput.trim(),
+                            "otp" to forgotOtpInput.trim(),
+                            "newPassword" to forgotNewPasswordInput
+                          )
+                          val response = NetworkService.api.resetPassword(body)
+                          android.widget.Toast.makeText(context, response["message"] as? String ?: "Passphrase reset successful!", android.widget.Toast.LENGTH_LONG).show()
+                          
+                          showForgotPassword = false
+                          forgotPasswordStep = 1
+                          loginCredentialInput = forgotIdentityInput
+                          loginPasswordInput = ""
+                        } catch (e: Exception) {
+                          val msg = e.message ?: ""
+                          if (msg.contains("same as your old") || msg.contains("400")) {
+                            forgotErrorMessage = "✗ Security Violation: Your new password cannot be identical to your old password."
+                          } else {
+                            forgotErrorMessage = e.localizedMessage ?: "✗ Reset failed. Please check parameters."
+                          }
+                        } finally {
+                          isLoading = false
+                        }
+                      }
+                    },
+                    enabled = isPasswordStrong && isConfirmMatch && !isLoading,
+                    colors = ButtonDefaults.buttonColors(
+                      containerColor = NeonCyan,
+                      contentColor = Color.Black,
+                      disabledContainerColor = NeonCyan.copy(alpha = 0.15f),
+                      disabledContentColor = Color.White.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(48.dp).testTag("forgot_finalize_btn")
+                  ) {
+                    if (isLoading) {
+                      CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
+                    } else {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Synthesize & Apply Passphrase", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                      }
+                    }
+                  }
+                }
+              }
+            } else if (!isSignUp) {
               // ================= SIGN IN LAYOUT =================
               Text(
                 text = "Explorer Handle or Email",
@@ -5864,7 +6252,26 @@ fun BentoAuthScreen(
                 }
               }
 
-              Spacer(modifier = Modifier.height(20.dp))
+              Spacer(modifier = Modifier.height(14.dp))
+
+              Text(
+                text = "Forgot your passphrase? Recover it here.",
+                color = Color.Gray,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                style = TextStyle(textDecoration = TextDecoration.Underline),
+                modifier = Modifier
+                  .align(Alignment.CenterHorizontally)
+                  .clickable {
+                    showForgotPassword = true
+                    forgotPasswordStep = 1
+                    forgotIdentityInput = ""
+                    forgotErrorMessage = ""
+                  }
+                  .padding(vertical = 4.dp)
+              )
+
+              Spacer(modifier = Modifier.height(14.dp))
 
               Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -7006,6 +7413,32 @@ fun savePostToLocalStorage(context: Context, post: MobilePost) {
     newArray.put(obj)
     for (i in 0 until array.length()) {
       newArray.put(array.getJSONObject(i))
+    }
+    prefs.edit().putString("local_posts", newArray.toString()).apply()
+  } catch (e: Exception) {
+    e.printStackTrace()
+  }
+}
+
+fun saveAllPostsToLocalStorage(context: Context, posts: List<MobilePost>) {
+  val prefs = context.getSharedPreferences("safari_sphere_local_db", Context.MODE_PRIVATE)
+  try {
+    val newArray = org.json.JSONArray()
+    posts.take(50).forEach { post ->
+      val obj = org.json.JSONObject()
+      obj.put("id", post.id)
+      obj.put("author", post.author)
+      obj.put("username", post.username)
+      obj.put("avatarUrl", post.avatarUrl)
+      obj.put("content", post.content)
+      obj.put("vibeCategory", post.vibeCategory)
+      obj.put("likes", post.likes)
+      obj.put("hasLiked", post.hasLiked)
+      obj.put("created", post.created)
+      obj.put("mediaUrl", post.mediaUrl ?: "")
+      obj.put("mediaType", post.mediaType)
+      obj.put("commentsCount", post.commentsCount)
+      newArray.put(obj)
     }
     prefs.edit().putString("local_posts", newArray.toString()).apply()
   } catch (e: Exception) {

@@ -631,4 +631,98 @@ router.get('/explorers', authMiddleware, async (req, res) => {
   }
 });
 
+// 15. REQUEST PASSWORD RESET (FORGOT PASSWORD)
+router.post('/forgot-password', async (req, res) => {
+  const { usernameOrEmail } = req.body;
+  if (!usernameOrEmail) {
+    return res.status(400).json({ error: 'Please enter your username or registered email address.' });
+  }
+
+  const identity = usernameOrEmail.trim();
+
+  try {
+    let user = null;
+    if (!dbService.isMock) {
+      const userRes = await dbService.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)', [identity, identity.toLowerCase()]);
+      if (userRes.rows.length > 0) user = userRes.rows[0];
+    } else {
+      const store = dbService.getMockStore();
+      user = store.users.find(u => u.username.toLowerCase() === identity.toLowerCase() || u.email.toLowerCase() === identity.toLowerCase());
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        available: false,
+        isRegistered: false,
+        error: 'This account username or email is not registered. Would you like to create an account?'
+      });
+    }
+
+    // Generate & Dispatch OTP
+    console.log(`[Forgot Password] Generating recovery OTP for ${user.email}...`);
+    const otpResponse = await otpService.sendOTP(user.email);
+    res.json({
+      success: true,
+      isRegistered: true,
+      email: user.email,
+      message: `A recovery code has been securely dispatched to your email address at: ${user.email}`,
+      debugOtp: otpResponse.debugOtp || null
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 16. VERIFY AND UPDATE TO NEW PASSWORD
+router.post('/reset-password', async (req, res) => {
+  const { usernameOrEmail, otp, newPassword } = req.body;
+  if (!usernameOrEmail || !otp || !newPassword) {
+    return res.status(400).json({ error: 'Please submit all required credentials: identity, verification code, and new passphrase.' });
+  }
+
+  const identity = usernameOrEmail.trim();
+
+  try {
+    let user = null;
+    if (!dbService.isMock) {
+      const userRes = await dbService.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($2)', [identity, identity.toLowerCase()]);
+      if (userRes.rows.length > 0) user = userRes.rows[0];
+    } else {
+      const store = dbService.getMockStore();
+      user = store.users.find(u => u.username.toLowerCase() === identity.toLowerCase() || u.email.toLowerCase() === identity.toLowerCase());
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: 'Identity credentials not found. Reset flow invalidated.' });
+    }
+
+    // Verify OTP
+    const isOtpValid = await otpService.verifyOTP(user.email, otp);
+    if (!isOtpValid) {
+      return res.status(400).json({ error: 'Invalid or expired recovery OTP. Please enter the correct code.' });
+    }
+
+    // Rule: Password should not be the same as before
+    const isSamePassword = await bcrypt.compare(newPassword, user.password_hash);
+    if (isSamePassword) {
+      return res.status(400).json({ error: 'Your new password cannot be the same as your old password. Please choose a different password.' });
+    }
+
+    // Hash & update
+    const hashedPass = await bcrypt.hash(newPassword, 10);
+    if (!dbService.isMock) {
+      await dbService.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedPass, user.id]);
+    } else {
+      user.password_hash = hashedPass;
+    }
+
+    res.json({
+      success: true,
+      message: 'Passphrase updated successfully! Proceeding back to login screen.'
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

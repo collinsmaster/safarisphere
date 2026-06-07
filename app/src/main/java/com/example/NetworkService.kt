@@ -190,6 +190,12 @@ interface SafariSphereApi {
   @POST("auth/login")
   suspend fun login(@Body body: Map<String, String>): AuthResponse
 
+  @POST("auth/forgot-password")
+  suspend fun forgotPassword(@Body body: Map<String, String>): Map<String, Any>
+
+  @POST("auth/reset-password")
+  suspend fun resetPassword(@Body body: Map<String, String>): Map<String, Any>
+
   @GET("auth/profile")
   suspend fun getProfile(): BackendUserProfile
 
