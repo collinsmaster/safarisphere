@@ -57,6 +57,97 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import coil.compose.AsyncImage
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.shape.CornerSize
+
+// ==============================================================================
+// 🌟 HELPER METADATA MODELS, PARSERS, AND CUSTOM COLOR FILTERS FOR LOCAL MEDIA POSTS
+// ==============================================================================
+data class MediaMetadata(val ratio: String?, val rotation: Float, val filter: String?)
+
+fun parsePostMetadata(content: String): Pair<String, MediaMetadata> {
+  var cleanContent = content
+  var ratio: String? = null
+  var rotation = 0f
+  var filter: String? = null
+  
+  val ratioRegex = "\\[RATIO:([^\\]]*)\\]".toRegex()
+  val rotRegex = "\\[ROT:([^\\]]*)\\]".toRegex()
+  val filterRegex = "\\[FILTER:([^\\]]*)\\]".toRegex()
+  
+  ratioRegex.find(content)?.let {
+    ratio = it.groupValues[1]
+    cleanContent = cleanContent.replace(it.value, "")
+  }
+  rotRegex.find(content)?.let {
+    rotation = it.groupValues[1].toFloatOrNull() ?: 0f
+    cleanContent = cleanContent.replace(it.value, "")
+  }
+  filterRegex.find(content)?.let {
+    filter = it.groupValues[1]
+    cleanContent = cleanContent.replace(it.value, "")
+  }
+  return cleanContent.trim() to MediaMetadata(ratio, rotation, filter)
+}
+
+fun getComposeColorFilter(filterName: String): androidx.compose.ui.graphics.ColorFilter? {
+  return when (filterName) {
+    "Cyberpunk" -> {
+      androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+        androidx.compose.ui.graphics.ColorMatrix(
+          floatArrayOf(
+            1.2f, 0f, 0.4f, 0f, 30f,
+            0f, 0.9f, 0.2f, 0f, 0f,
+            0.2f, 0.4f, 1.4f, 0f, 40f,
+            0f, 0f, 0f, 1f, 0f
+          )
+        )
+      )
+    }
+    "Mono" -> {
+      androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+        androidx.compose.ui.graphics.ColorMatrix(
+          floatArrayOf(
+            0.33f, 0.59f, 0.11f, 0f, 0f,
+            0.33f, 0.59f, 0.11f, 0f, 0f,
+            0.33f, 0.59f, 0.11f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+          )
+        )
+      )
+    }
+    "Amber" -> {
+      androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+        androidx.compose.ui.graphics.ColorMatrix(
+          floatArrayOf(
+            1.1f, 0f, 0f, 0f, 40f,
+            0f, 0.9f, 0f, 0f, 10f,
+            0f, 0f, 0.7f, 0f, -10f,
+            0f, 0f, 0f, 1f, 0f
+          )
+        )
+      )
+    }
+    "Forest" -> {
+      androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+        androidx.compose.ui.graphics.ColorMatrix(
+          floatArrayOf(
+            0.8f, 0f, 0f, 0f, -10f,
+            0f, 1.2f, 0.1f, 0f, 20f,
+            0f, 0.1f, 0.9f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+          )
+        )
+      )
+    }
+    else -> null
+  }
+}
 
 // ==============================================================================
 // 🌟 SAFARI SPHERE MAIN ENTRYPOINT & UI ENGINE
@@ -193,6 +284,13 @@ fun SafariSphereApp() {
   var newPostContent by remember { mutableStateOf("") }
   var activeCategory by remember { mutableStateOf("Adventurer") }
 
+  // Media & FAB state variables
+  var isFabVisible by remember { mutableStateOf(true) }
+  var showMediaEditor by remember { mutableStateOf(false) }
+  var selectedMediaFilter by remember { mutableStateOf("Normal") }
+  var mediaRotationZ by remember { mutableStateOf(0f) }
+  var selectedAspectRatio by remember { mutableStateOf("Original") }
+
   // Chat conversation parameters
   var typingMessage by remember { mutableStateOf("") }
   var isAiTyping by remember { mutableStateOf(false) }
@@ -207,6 +305,7 @@ fun SafariSphereApp() {
   }
 
   // General Notification attributes
+  var triggerProfileSettingsShow by remember { mutableStateOf(false) }
   var showNotificationsDialog by remember { mutableStateOf(false) }
   val notificationsList = remember { mutableStateListOf<BackendNotification>() }
   var isFetchingNotifications by remember { mutableStateOf(false) }
@@ -216,10 +315,29 @@ fun SafariSphereApp() {
   val commentsListForActivePost = remember { mutableStateListOf<BackendComment>() }
   var isFetchingComments by remember { mutableStateOf(false) }
   var typingCommentText by remember { mutableStateOf("") }
+  var isPostingComment by remember { mutableStateOf(false) }
+
+  // Social feed, rooms, and uploading states
+  var isFetchingPosts by remember { mutableStateOf(false) }
+  var isFetchingRooms by remember { mutableStateOf(false) }
+  var isUploadingPost by remember { mutableStateOf(false) }
+  var uploadProgressAmount by remember { mutableStateOf(0f) }
+  var uploadTelemetryText by remember { mutableStateOf("Initializing Upload...") }
 
   // Compose additions
   var postMediaUrl by remember { mutableStateOf("") }
   var postMediaType by remember { mutableStateOf("text") } // "text", "image", "video"
+
+  val postMediaPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+  ) { uri ->
+    if (uri != null) {
+      postMediaUrl = uri.toString()
+      selectedMediaFilter = "Normal"
+      mediaRotationZ = 0f
+      selectedAspectRatio = "Original"
+    }
+  }
 
   val loadCommentsForPost: (String) -> Unit = { postId ->
     scope.launch {
@@ -230,19 +348,6 @@ fun SafariSphereApp() {
         commentsListForActivePost.addAll(comments)
       } catch (e: Exception) {
         commentsListForActivePost.clear()
-        commentsListForActivePost.add(
-          BackendComment(
-            id = "c_mock_1",
-            postId = postId,
-            authorId = "u_tester_1",
-            parentId = null,
-            content = "This post captures the true wild digital wilderness! 🌴🌟",
-            createdAt = "5 mins ago",
-            displayName = "Luna Wilde ✨",
-            username = "luna_quest",
-            avatarUrl = ""
-          )
-        )
       } finally {
         isFetchingComments = false
       }
@@ -250,7 +355,8 @@ fun SafariSphereApp() {
   }
 
   val postComment: (String, String) -> Unit = { postId, text ->
-    if (text.isNotBlank()) {
+    if (text.isNotBlank() && !isPostingComment) {
+      isPostingComment = true
       scope.launch {
         try {
           NetworkService.api.createComment(postId, CreateCommentRequest(content = text))
@@ -281,10 +387,14 @@ fun SafariSphereApp() {
             val post = postsList[idx]
             postsList[idx] = post.copy(commentsCount = post.commentsCount + 1)
           }
+        } finally {
+          isPostingComment = false
         }
       }
     }
   }
+
+
 
   val loadNotificationsFromBackend = {
     scope.launch {
@@ -382,11 +492,17 @@ fun SafariSphereApp() {
 
   val loadPostsFromBackend = {
     scope.launch {
+      isFetchingPosts = true
+      // Load local posts initially for immediate, seamless rendering
+      val localPosts = getLocalStoredPosts(context)
+      if (localPosts.isNotEmpty() && postsList.isEmpty()) {
+        postsList.addAll(localPosts)
+      }
       try {
         val backendPosts = NetworkService.api.getPosts()
-        postsList.clear()
+        val mergedPosts = mutableListOf<MobilePost>()
         backendPosts.forEach { bp ->
-          postsList.add(
+          mergedPosts.add(
             MobilePost(
               id = bp.id,
               author = bp.displayName ?: bp.username ?: "Anonymous Pioneer",
@@ -403,8 +519,52 @@ fun SafariSphereApp() {
             )
           )
         }
+        
+        // Merge in any local posts that are not yet on the backend feed
+        val backendIdsSet = backendPosts.map { it.id }.toSet()
+        localPosts.forEach { lp ->
+          if (!backendIdsSet.contains(lp.id)) {
+            mergedPosts.add(0, lp)
+          }
+        }
+        
+        postsList.clear()
+        postsList.addAll(mergedPosts)
       } catch (e: Exception) {
-        // Fallback or quiet keep existing
+        if (postsList.isEmpty()) {
+          postsList.addAll(localPosts)
+        }
+      } finally {
+        isFetchingPosts = false
+      }
+    }
+  }
+
+  val loadRoomsFromBackend = {
+    scope.launch {
+      isFetchingRooms = true
+      try {
+        val serverRooms = NetworkService.api.getRooms()
+        if (serverRooms.isNotEmpty()) {
+          roomsList.clear()
+          serverRooms.forEach { r ->
+            roomsList.add(
+              MobileRoom(
+                id = r.id,
+                title = r.title.replace("vybe", "sphere", ignoreCase = true).replace("Vybe", "Sphere", ignoreCase = true),
+                host = r.hostId ?: "Anonymous Host",
+                description = (r.description ?: "").replace("vybe", "sphere", ignoreCase = true).replace("Vybe", "Sphere", ignoreCase = true),
+                theme = r.theme ?: "neon-sunset",
+                membersCount = r.activeMembersCount ?: 0,
+                maxMembers = r.maxMembers ?: 50
+              )
+            )
+          }
+        }
+      } catch (e: Exception) {
+        // quiet fallback
+      } finally {
+        isFetchingRooms = false
       }
     }
   }
@@ -488,10 +648,14 @@ fun SafariSphereApp() {
     if (isAuthenticated) {
       loadPostsFromBackend()
       loadUserProfile()
+      loadRoomsFromBackend()
     }
   }
 
   LaunchedEffect(selectedTab) {
+    if (selectedTab == 1) {
+      loadRoomsFromBackend()
+    }
     if (selectedTab == 2 || selectedTab == 3) {
       loadExplorers()
     }
@@ -602,29 +766,45 @@ fun SafariSphereApp() {
               }
             }
           }
-          IconButton(onClick = { /* Simulated Settings */ }) {
-            Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
+          if (selectedTab == 4) {
+            IconButton(
+              onClick = { triggerProfileSettingsShow = true },
+              modifier = Modifier.testTag("top_bar_settings_btn")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+                tint = NeonCyan,
+                modifier = Modifier.size(24.dp)
+              )
+            }
           }
         }
       )
     },
     floatingActionButton = {
       if (selectedTab == 0) {
-        FloatingActionButton(
-          onClick = { showNewPostSheet = true },
-          containerColor = NeonCyan,
-          contentColor = Color.Black,
-          shape = RoundedCornerShape(16.dp),
-          modifier = Modifier
-            .testTag("fab_create_post")
-            .shadow(
-              elevation = 12.dp,
-              shape = RoundedCornerShape(16.dp),
-              ambientColor = NeonCyan.copy(alpha = 0.4f),
-              spotColor = NeonCyan.copy(alpha = 0.4f)
-            )
+        androidx.compose.animation.AnimatedVisibility(
+          visible = isFabVisible,
+          enter = androidx.compose.animation.scaleIn(animationSpec = androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy)) + androidx.compose.animation.fadeIn(),
+          exit = androidx.compose.animation.scaleOut(animationSpec = androidx.compose.animation.core.spring(dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy)) + androidx.compose.animation.fadeOut()
         ) {
-          Icon(imageVector = Icons.Default.Add, contentDescription = "Compose Post", modifier = Modifier.size(28.dp))
+          FloatingActionButton(
+            onClick = { showNewPostSheet = true },
+            containerColor = NeonCyan,
+            contentColor = Color.Black,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+              .testTag("fab_create_post")
+              .shadow(
+                elevation = 12.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = NeonCyan.copy(alpha = 0.4f),
+                spotColor = NeonCyan.copy(alpha = 0.4f)
+              )
+          ) {
+            Icon(imageVector = Icons.Default.Add, contentDescription = "Compose Post", modifier = Modifier.size(28.dp))
+          }
         }
       }
     },
@@ -691,219 +871,384 @@ fun SafariSphereApp() {
           )
         )
     ) {
-      // Swipeable or crossfade selection representing selected tabs
-      Crossfade(targetState = selectedTab, label = "tab_navigation") { tab ->
-        when (tab) {
-          0 -> FeedTab(
-            moments = momentsList,
-            posts = postsList,
-            onLikeClicked = { post ->
-              val index = postsList.indexOf(post)
-              if (index != -1) {
-                val updated = post.copy(
-                  likes = if (post.hasLiked) post.likes - 1 else post.likes + 1,
-                  hasLiked = !post.hasLiked
-                )
-                postsList[index] = updated
-                if (updated.hasLiked) {
-                  updateUserXp(15)
-                }
-                scope.launch {
-                  try {
-                    NetworkService.api.likePost(post.id)
-                  } catch (e: Exception) {
-                    // Failover silently
-                  }
-                }
+      val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 5 })
+
+      LaunchedEffect(selectedTab) {
+        if (pagerState.currentPage != selectedTab) {
+          pagerState.animateScrollToPage(selectedTab)
+        }
+      }
+
+      LaunchedEffect(pagerState.currentPage) {
+        selectedTab = pagerState.currentPage
+      }
+
+      androidx.compose.foundation.pager.HorizontalPager(
+        state = pagerState,
+        modifier = Modifier.fillMaxSize()
+      ) { page ->
+        when (page) {
+          0 -> {
+            ModernPullToRefresh(
+              isRefreshing = isFetchingPosts,
+              onRefresh = { 
+                loadPostsFromBackend()
+                loadUserProfile()
               }
-            },
-            onMomentClicked = { mom ->
-              val index = momentsList.indexOf(mom)
-              if (index != -1) {
-                momentsList[index] = mom.copy(isUnread = false)
-              }
-              selectedMoment = mom
-              updateUserXp(5)
-            },
-            onCommentClicked = { post ->
-              activePostForComments = post
-              loadCommentsForPost(post.id)
-            }
-          )
-          1 -> RoomsTab(
-            rooms = roomsList,
-            onJoinRoom = { room ->
-              val index = roomsList.indexOf(room)
-              if (index != -1) {
-                roomsList[index] = room.copy(membersCount = room.membersCount + 1)
-                updateUserXp(25)
-              }
-            }
-          )
-          2 -> AICompanionTab(
-            explorers = explorersList,
-            chats = activeChatsList,
-            activeChatId = activeChatId.value,
-            chatMessages = activeChatMessages,
-            userInput = typingMessage,
-            isFetchingExplorers = isFetchingExplorers,
-            isFetchingChats = isFetchingChats,
-            onUserInputChange = { typingMessage = it },
-            onSelectExplorer = { explorer ->
-              selectExplorer(explorer)
-            },
-            onSelectChat = { chat ->
-              activeChatId.value = chat.id
-              loadMessages(chat.id)
-            },
-            onSendMessage = {
-              if (typingMessage.isNotBlank() && activeChatId.value != null) {
-                val contentToSend = typingMessage
-                typingMessage = ""
-                activeChatMessages.add(
-                  BackendMessage(
-                    id = "msg_opt_${System.currentTimeMillis()}",
-                    chatId = activeChatId.value,
-                    senderId = "me",
-                    content = contentToSend,
-                    createdAt = "Just now",
-                    senderName = userNickname
-                  )
-                )
-                scope.launch {
-                  try {
-                    NetworkService.api.sendMessage(activeChatId.value!!, SendMessageRequest(content = contentToSend))
-                    loadMessages(activeChatId.value!!)
-                  } catch (e: Exception) {
-                    // Failover gracefully
-                  }
-                  updateUserXp(10)
-                }
-              }
-            },
-            onBackToChatList = {
-              activeChatId.value = null
-              activeChatMessages.clear()
-            }
-          )
-          3 -> DiscoverTab(
-            communities = communitiesList,
-            explorers = explorersList,
-            posts = postsList,
-            onJoinCommunity = { comm ->
-              val index = communitiesList.indexOf(comm)
-              if (index != -1) {
-                val updated = comm.copy(
-                  members = if (comm.isJoined) comm.members - 1 else comm.members + 1,
-                  isJoined = !comm.isJoined
-                )
-                communitiesList[index] = updated
-                if (updated.isJoined) {
-                  updateUserXp(50)
-                }
-              }
-            },
-            onInitiateDM = { explorer ->
-              scope.launch {
-                try {
-                  val result = NetworkService.api.initiateChat(InitiateChatRequest(recipientId = explorer.id))
-                  val newChatId = result.chatId
-                  if (newChatId != null) {
-                    val alreadyIn = activeChatsList.any { it.id == newChatId }
-                    if (!alreadyIn) {
-                      activeChatsList.add(
-                        BackendChat(
-                          id = newChatId,
-                          isGroup = false,
-                          peerId = explorer.id,
-                          peerName = explorer.displayName ?: explorer.username,
-                          peerAvatar = "",
-                          createdAt = ""
-                        )
-                      )
+            ) {
+              FeedTab(
+                moments = momentsList,
+                posts = postsList,
+                isFetchingPosts = isFetchingPosts,
+                onScrollDirectionChanged = { isVisible ->
+                  isFabVisible = isVisible
+                },
+                onLikeClicked = { post ->
+                  val index = postsList.indexOf(post)
+                  if (index != -1) {
+                    val updated = post.copy(
+                      likes = if (post.hasLiked) post.likes - 1 else post.likes + 1,
+                      hasLiked = !post.hasLiked
+                    )
+                    postsList[index] = updated
+                    if (updated.hasLiked) {
+                      updateUserXp(15)
                     }
-                    selectedTab = 2
-                    android.widget.Toast.makeText(context, "Direct DM ready!", android.widget.Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                      try {
+                        NetworkService.api.likePost(post.id)
+                      } catch (e: Exception) {
+                        // Failover silently
+                      }
+                    }
                   }
-                } catch (e: Exception) {
-                  val fakeChatId = "chat_${explorer.id}_fallback"
-                  val alreadyIn = activeChatsList.any { it.id == fakeChatId }
-                  if (!alreadyIn) {
-                    activeChatsList.add(
-                      BackendChat(
-                        id = fakeChatId,
-                        isGroup = false,
-                        peerId = explorer.id,
-                        peerName = explorer.displayName ?: explorer.username,
-                        peerAvatar = "",
-                        createdAt = ""
+                },
+                onMomentClicked = { mom ->
+                  val index = momentsList.indexOf(mom)
+                  if (index != -1) {
+                    momentsList[index] = mom.copy(isUnread = false)
+                  }
+                  selectedMoment = mom
+                  updateUserXp(5)
+                },
+                onCommentClicked = { post ->
+                  activePostForComments = post
+                  loadCommentsForPost(post.id)
+                }
+              )
+            }
+          }
+          1 -> {
+            ModernPullToRefresh(
+              isRefreshing = isFetchingRooms,
+              onRefresh = { loadRoomsFromBackend() }
+            ) {
+              RoomsTab(
+                rooms = roomsList,
+                isFetchingRooms = isFetchingRooms,
+                onJoinRoom = { room ->
+                  val index = roomsList.indexOf(room)
+                  if (index != -1) {
+                    roomsList[index] = room.copy(membersCount = room.membersCount + 1)
+                    updateUserXp(25)
+                  }
+                }
+              )
+            }
+          }
+          2 -> {
+            ModernPullToRefresh(
+              isRefreshing = isFetchingChats,
+              onRefresh = { loadChats() }
+            ) {
+              AICompanionTab(
+                explorers = explorersList,
+                chats = activeChatsList,
+                activeChatId = activeChatId.value,
+                chatMessages = activeChatMessages,
+                userInput = typingMessage,
+                isFetchingExplorers = isFetchingExplorers,
+                isFetchingChats = isFetchingChats,
+                onUserInputChange = { typingMessage = it },
+                onSelectExplorer = { explorer ->
+                  selectExplorer(explorer)
+                },
+                onSelectChat = { chat ->
+                  activeChatId.value = chat.id
+                  loadMessages(chat.id)
+                },
+                onSendMessage = {
+                  if (typingMessage.isNotBlank() && activeChatId.value != null) {
+                    val contentToSend = typingMessage
+                    typingMessage = ""
+                    activeChatMessages.add(
+                      BackendMessage(
+                        id = "msg_opt_${System.currentTimeMillis()}",
+                        chatId = activeChatId.value,
+                        senderId = "me",
+                        content = contentToSend,
+                        createdAt = "Just now",
+                        senderName = userNickname
                       )
                     )
+                    scope.launch {
+                      try {
+                        NetworkService.api.sendMessage(activeChatId.value!!, SendMessageRequest(content = contentToSend))
+                        loadMessages(activeChatId.value!!)
+                      } catch (e: Exception) {
+                        // Failover gracefully
+                      }
+                      updateUserXp(10)
+                    }
                   }
-                  selectedTab = 2
+                },
+                onBackToChatList = {
+                  activeChatId.value = null
+                  activeChatMessages.clear()
                 }
+              )
+            }
+          }
+          3 -> {
+            ModernPullToRefresh(
+              isRefreshing = isFetchingExplorers,
+              onRefresh = { loadExplorers() }
+            ) {
+              DiscoverTab(
+                communities = communitiesList,
+                explorers = explorersList,
+                posts = postsList,
+                onJoinCommunity = { comm ->
+                  val index = communitiesList.indexOf(comm)
+                  if (index != -1) {
+                    val updated = comm.copy(
+                      members = if (comm.isJoined) comm.members - 1 else comm.members + 1,
+                      isJoined = !comm.isJoined
+                    )
+                    communitiesList[index] = updated
+                    if (updated.isJoined) {
+                      updateUserXp(50)
+                    }
+                  }
+                },
+                onInitiateDM = { explorer ->
+                  scope.launch {
+                    try {
+                      val result = NetworkService.api.initiateChat(InitiateChatRequest(recipientId = explorer.id))
+                      val newChatId = result.chatId
+                      if (newChatId != null) {
+                        val alreadyIn = activeChatsList.any { it.id == newChatId }
+                        if (!alreadyIn) {
+                          activeChatsList.add(
+                            BackendChat(
+                              id = newChatId,
+                              isGroup = false,
+                              peerId = explorer.id,
+                              peerName = explorer.displayName ?: explorer.username,
+                              peerAvatar = "",
+                              createdAt = ""
+                            )
+                          )
+                        }
+                        selectedTab = 2
+                        android.widget.Toast.makeText(context, "Direct DM ready!", android.widget.Toast.LENGTH_SHORT).show()
+                      }
+                    } catch (e: Exception) {
+                      val fakeChatId = "chat_${explorer.id}_fallback"
+                      val alreadyIn = activeChatsList.any { it.id == fakeChatId }
+                      if (!alreadyIn) {
+                        activeChatsList.add(
+                          BackendChat(
+                            id = fakeChatId,
+                            isGroup = false,
+                            peerId = explorer.id,
+                            peerName = explorer.displayName ?: explorer.username,
+                            peerAvatar = "",
+                            createdAt = ""
+                          )
+                        )
+                      }
+                      selectedTab = 2
+                    }
+                  }
+                },
+                onCommentClicked = { post ->
+                  activePostForComments = post
+                  loadCommentsForPost(post.id)
+                }
+              )
+            }
+          }
+          4 -> {
+            ModernPullToRefresh(
+              isRefreshing = isFetchingProfile,
+              onRefresh = { loadUserProfile() }
+            ) {
+              IdentityTab(
+                xp = userXp,
+                streak = userStreak,
+                mood = userMood,
+                moodEmoji = userMoodEmoji,
+                nickname = userNickname,
+                handle = userHandle,
+                bio = userBio,
+                location = userLocation,
+                avatarUrl = userAvatarUrl,
+                joinDate = userJoinDate,
+                email = userEmail,
+                headline = userHeadline,
+                interests = userInterests,
+                onMoodSelected = { text, emo ->
+                  updateMood(text, emo)
+                },
+                onProfileUpdated = { newName, newBio, newLoc, newAvatar, newHandle, newEmail, newHeadline, newInterests ->
+                  userNickname = newName
+                  userBio = newBio
+                  userLocation = newLoc
+                  userAvatarUrl = if (newAvatar.isEmpty()) null else newAvatar
+                  userHandle = newHandle
+                  userEmail = newEmail
+                  userHeadline = newHeadline
+                  userInterests = newInterests
+                  prefs.edit()
+                    .putString("user_nickname", newName)
+                    .putString("user_bio", newBio)
+                    .putString("user_location", newLoc)
+                    .putString("user_avatar_url", if (newAvatar.isEmpty()) null else newAvatar)
+                    .putString("user_handle", newHandle)
+                    .putString("user_email", newEmail)
+                    .putString("user_headline", newHeadline)
+                    .putString("user_interests", newInterests)
+                    .apply()
+                },
+                onLogOut = {
+                  prefs.edit().clear().apply()
+                  userXp = 100
+                  userStreak = 1
+                  userMood = "Chill"
+                  userMoodEmoji = "🦁"
+                  userNickname = "Pioneer Prime"
+                  userHandle = "explorer_prime"
+                  userBio = "A fresh pioneer in Safari Sphere!"
+                  userLocation = "Savannah Valley"
+                  userAvatarUrl = null
+                  userJoinDate = null
+                  userHeadline = "Exploring uncharted digital frequencies..."
+                  userInterests = "Wildlife Safari, Sound Design, Live Beats"
+                  isAuthenticated = false
+                  selectedTab = 0
+                },
+                forceShowSettings = triggerProfileSettingsShow,
+                onDismissSettings = { triggerProfileSettingsShow = false },
+                isFetchingProfile = isFetchingProfile
+              )
+            }
+          }
+        }
+      }
+
+      // ----------------------------------------------------------------------------
+      // HOLOGRAPHIC AMBIENT UPLOADING PROGRESS OVERLAY
+      // ----------------------------------------------------------------------------
+      if (isUploadingPost) {
+        Box(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.82f))
+            .clickable(enabled = false) {}, // absorb clicks to prevent spamming
+          contentAlignment = Alignment.Center
+        ) {
+          Surface(
+            modifier = Modifier
+              .fillMaxWidth(0.85f)
+              .wrapContentHeight(),
+            shape = RoundedCornerShape(28.dp),
+            color = GlassyCard,
+            border = BorderStroke(2.dp, NeonCyan.copy(alpha = 0.35f))
+          ) {
+            Column(
+              modifier = Modifier.padding(26.dp),
+              horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+              val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+              val glowScale by infiniteTransition.animateFloat(
+                initialValue = 0.9f,
+                targetValue = 1.15f,
+                animationSpec = infiniteRepeatable(
+                  animation = tween(1000, easing = FastOutSlowInEasing),
+                  repeatMode = RepeatMode.Reverse
+                ),
+                label = "g"
+              )
+              
+              Box(
+                modifier = Modifier
+                  .size(90.dp)
+                  .graphicsLayer {
+                    scaleX = glowScale
+                    scaleY = glowScale
+                  }
+                  .clip(CircleShape)
+                  .background(NeonCyan.copy(alpha = 0.08f))
+                  .border(BorderStroke(2.dp, NeonCyan.copy(alpha = 0.5f)), CircleShape),
+                contentAlignment = Alignment.Center
+              ) {
+                Text("🛰️", fontSize = 38.sp)
               }
-            },
-            onCommentClicked = { post ->
-              activePostForComments = post
-              loadCommentsForPost(post.id)
+              
+              Spacer(modifier = Modifier.height(24.dp))
+              
+              Text(
+                "Broadcasting Transmission",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.5.sp
+              )
+              
+              Spacer(modifier = Modifier.height(6.dp))
+              
+              Text(
+                uploadTelemetryText,
+                color = NeonCyan,
+                fontSize = 12.sp,
+                fontStyle = FontStyle.Italic,
+                fontWeight = FontWeight.SemiBold
+              )
+              
+              Spacer(modifier = Modifier.height(28.dp))
+              
+              // Custom Unique Cosmic Meter (Segmented Linear Gradient Progress)
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(10.dp)
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(Color.White.copy(alpha = 0.08f))
+              ) {
+                Box(
+                  modifier = Modifier
+                    .fillMaxWidth(uploadProgressAmount)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                      Brush.horizontalGradient(
+                        colors = listOf(NeonCyan, BentoIndigo, NeonCyan)
+                      )
+                    )
+                )
+              }
+              
+              Spacer(modifier = Modifier.height(14.dp))
+              
+              Text(
+                "${(uploadProgressAmount * 100).toInt()}% Secure Connection",
+                color = Color.Gray,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+              )
             }
-          )
-          4 -> IdentityTab(
-            xp = userXp,
-            streak = userStreak,
-            mood = userMood,
-            moodEmoji = userMoodEmoji,
-            nickname = userNickname,
-            handle = userHandle,
-            bio = userBio,
-            location = userLocation,
-            avatarUrl = userAvatarUrl,
-            joinDate = userJoinDate,
-            email = userEmail,
-            headline = userHeadline,
-            interests = userInterests,
-            onMoodSelected = { text, emo ->
-              updateMood(text, emo)
-            },
-            onProfileUpdated = { newName, newBio, newLoc, newAvatar, newHandle, newEmail, newHeadline, newInterests ->
-              userNickname = newName
-              userBio = newBio
-              userLocation = newLoc
-              userAvatarUrl = if (newAvatar.isEmpty()) null else newAvatar
-              userHandle = newHandle
-              userEmail = newEmail
-              userHeadline = newHeadline
-              userInterests = newInterests
-              prefs.edit()
-                .putString("user_nickname", newName)
-                .putString("user_bio", newBio)
-                .putString("user_location", newLoc)
-                .putString("user_avatar_url", if (newAvatar.isEmpty()) null else newAvatar)
-                .putString("user_handle", newHandle)
-                .putString("user_email", newEmail)
-                .putString("user_headline", newHeadline)
-                .putString("user_interests", newInterests)
-                .apply()
-            },
-            onLogOut = {
-              prefs.edit().clear().apply()
-              userXp = 100
-              userStreak = 1
-              userMood = "Chill"
-              userMoodEmoji = "🦁"
-              userNickname = "Pioneer Prime"
-              userHandle = "explorer_prime"
-              userBio = "A fresh pioneer in Safari Sphere!"
-              userLocation = "Savannah Valley"
-              userAvatarUrl = null
-              userJoinDate = null
-              userHeadline = "Exploring uncharted digital frequencies..."
-              userInterests = "Wildlife Safari, Sound Design, Live Beats"
-              isAuthenticated = false
-              selectedTab = 0
-            }
-          )
+          }
         }
       }
 
@@ -1023,53 +1368,83 @@ fun SafariSphereApp() {
               if (postMediaType != "text") {
                 Spacer(modifier = Modifier.height(10.dp))
 
-                OutlinedTextField(
-                  value = postMediaUrl,
-                  onValueChange = { postMediaUrl = it },
-                  placeholder = { Text(if (postMediaType == "image") "Paste online image URL..." else "Paste online .mp4 video URL...", color = Color.Gray, fontSize = 12.sp) },
-                  colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonCyan,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                  ),
-                  modifier = Modifier.fillMaxWidth().height(52.dp).testTag("post_media_url_input"),
-                  textStyle = TextStyle(fontSize = 12.sp)
-                )
+                if (postMediaUrl.isEmpty()) {
+                  Button(
+                    onClick = {
+                      val mime = if (postMediaType == "image") "image/*" else "video/*"
+                      postMediaPickerLauncher.launch(mime)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                  ) {
+                    Icon(imageVector = Icons.Default.Share, contentDescription = "Pick", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Select Local Device File", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  }
+                } else {
+                  // Display preview of chosen local media with the edits!
+                  Column(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                      .padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                  ) {
+                    Text(
+                      text = "📍 Local File Selected",
+                      color = SoftNeonMint,
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(bottom = 6.dp)
+                    )
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // Quick Presets
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.spacedBy(6.dp),
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
-                  Text("Quick Presets:", color = Color.Gray, fontSize = 10.sp)
-                  if (postMediaType == "image") {
-                    listOf(
-                      Pair("🦁 Lion", "https://images.unsplash.com/photo-1546182990-dffeafbe841d?auto=format&fit=crop&w=600&q=80"),
-                      Pair("🐆 Cheetah", "https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=600&q=80")
-                    ).forEach { (caption, url) ->
-                      Surface(
-                        modifier = Modifier.clickable { postMediaUrl = url },
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White.copy(alpha = 0.08f)
-                      ) {
-                        Text(caption, color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
-                      }
+                    // Render selected local media in small window in post creator sheet
+                    Box(
+                      modifier = Modifier
+                        .size(100.dp)
+                        .graphicsLayer(rotationZ = mediaRotationZ)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      AsyncImage(
+                        model = postMediaUrl,
+                        contentDescription = "Attachment Draft Preview",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        colorFilter = getComposeColorFilter(selectedMediaFilter)
+                      )
                     }
-                  } else {
-                    listOf(
-                      Pair("🎥 Safari Clip", "https://assets.mixkit.co/videos/preview/mixkit-safari-expedition-jeep-on-trail-43187-large.mp4"),
-                      Pair("🌊 Oasis Lake", "https://assets.mixkit.co/videos/preview/mixkit-waves-crashing-on-a-beach-from-above-41553-large.mp4")
-                    ).forEach { (caption, url) ->
-                      Surface(
-                        modifier = Modifier.clickable { postMediaUrl = url },
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color.White.copy(alpha = 0.08f)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                      horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                      // Edit Selected Media button
+                      Button(
+                        onClick = { showMediaEditor = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = BentoIndigo, contentColor = Color.White),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(28.dp)
                       ) {
-                        Text(caption, color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                        Text("🎨 Edit Selected Media", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                      }
+
+                      // Change file button
+                      Button(
+                        onClick = {
+                          val mime = if (postMediaType == "image") "image/*" else "video/*"
+                          postMediaPickerLauncher.launch(mime)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f), contentColor = Color.White),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(28.dp)
+                      ) {
+                        Text("Change Selection", fontSize = 10.sp)
                       }
                     }
                   }
@@ -1111,7 +1486,18 @@ fun SafariSphereApp() {
                 Button(
                   onClick = {
                     if (newPostContent.isNotBlank() || (postMediaType != "text" && postMediaUrl.isNotBlank())) {
-                      val contentToSend = newPostContent
+                      var contentToSend = newPostContent
+                      if (postMediaType != "text") {
+                        if (selectedAspectRatio != "Original") {
+                          contentToSend += " [RATIO:$selectedAspectRatio]"
+                        }
+                        if (mediaRotationZ != 0f) {
+                          contentToSend += " [ROT:$mediaRotationZ]"
+                        }
+                        if (selectedMediaFilter != "Normal") {
+                          contentToSend += " [FILTER:$selectedMediaFilter]"
+                        }
+                      }
                       val categoryToSend = activeCategory
                       val attachmentUrl = if (postMediaType != "text") postMediaUrl else null
                       val attachmentType = postMediaType
@@ -1120,6 +1506,16 @@ fun SafariSphereApp() {
                       showNewPostSheet = false
 
                       scope.launch {
+                        isUploadingPost = true
+                        uploadProgressAmount = 0.12f
+                        uploadTelemetryText = "Sifting local coordinate payload..."
+                        kotlinx.coroutines.delay(500)
+                        uploadProgressAmount = 0.45f
+                        uploadTelemetryText = "Aligning secure satellite links..."
+                        kotlinx.coroutines.delay(600)
+                        uploadProgressAmount = 0.78f
+                        uploadTelemetryText = "Transmitting telemetry data frequencies..."
+                        kotlinx.coroutines.delay(400)
                         try {
                           NetworkService.api.createPost(
                             CreatePostRequest(
@@ -1129,8 +1525,14 @@ fun SafariSphereApp() {
                               mediaType = attachmentType
                             )
                           )
+                          uploadProgressAmount = 1.0f
+                          uploadTelemetryText = "Secure orbit established!"
+                          kotlinx.coroutines.delay(400)
                           postMediaUrl = ""
                           postMediaType = "text"
+                          selectedMediaFilter = "Normal"
+                          mediaRotationZ = 0f
+                          selectedAspectRatio = "Original"
                           loadPostsFromBackend()
                         } catch (e: Exception) {
                           // Local offline fallback
@@ -1148,9 +1550,17 @@ fun SafariSphereApp() {
                             mediaType = attachmentType,
                             commentsCount = 0
                           )
+                          uploadProgressAmount = 1.0f
+                          uploadTelemetryText = "Stored locally in offline bank."
+                          kotlinx.coroutines.delay(500)
                           postMediaUrl = ""
                           postMediaType = "text"
+                          selectedMediaFilter = "Normal"
+                          mediaRotationZ = 0f
+                          selectedAspectRatio = "Original"
                           postsList.add(0, p)
+                        } finally {
+                          isUploadingPost = false
                         }
                         updateUserXp(40)
                       }
@@ -1167,192 +1577,343 @@ fun SafariSphereApp() {
       }
 
       // ============================================================================
-      // 🌟 DYNAMIC MODERN NOTIFICATIONS DRAWER OVERLAY
+      // 🎨 INTERACTIVE MEDIA FINE-TUNER OVERLAY
       // ============================================================================
-      if (showNotificationsDialog) {
+      if (showMediaEditor && postMediaUrl.isNotEmpty()) {
         Box(
           modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.82f))
-            .clickable { showNotificationsDialog = false },
+            .background(Color.Black.copy(alpha = 0.9f))
+            .clickable { showMediaEditor = false },
           contentAlignment = Alignment.Center
         ) {
           Surface(
             modifier = Modifier
-              .fillMaxWidth(0.92f)
-              .fillMaxHeight(0.85f)
+              .fillMaxWidth(0.95f)
+              .wrapContentHeight()
               .clickable(enabled = false) {},
             shape = RoundedCornerShape(24.dp),
-            color = Color(0xFF13131A),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+            color = Color(0xFF141419),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
           ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-              // Notification Header
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+              Text(
+                "🎨 Media Fine-Tuner",
+                color = SoftNeonMint,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 14.dp)
+              )
+
+              // Interactive Preview Window
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .height(240.dp)
+                  .background(Color.Black, RoundedCornerShape(16.dp))
+                  .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                  .padding(8.dp),
+                contentAlignment = Alignment.Center
+              ) {
+                // Apply rotation, filter, and selected aspect ratio natively in preview!
+                val previewModifier = Modifier
+                  .align(Alignment.Center)
+                  .then(
+                    when (selectedAspectRatio) {
+                      "1:1" -> Modifier.aspectRatio(1f)
+                      "4:5" -> Modifier.aspectRatio(0.8f)
+                      "5:7" -> Modifier.aspectRatio(5f / 7f)
+                      "16:9" -> Modifier.aspectRatio(16f / 9f)
+                      else -> Modifier.fillMaxSize()
+                    }
+                  )
+                  .graphicsLayer(rotationZ = mediaRotationZ)
+                  .clip(RoundedCornerShape(8.dp))
+
+                AsyncImage(
+                  model = postMediaUrl,
+                  contentDescription = "Editing preview",
+                  modifier = previewModifier,
+                  contentScale = if (selectedAspectRatio == "Original") androidx.compose.ui.layout.ContentScale.Fit else androidx.compose.ui.layout.ContentScale.Crop,
+                  colorFilter = getComposeColorFilter(selectedMediaFilter)
+                )
+              }
+
+              Spacer(modifier = Modifier.height(16.dp))
+
+              // Rotation Controller
               Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                Column {
-                  Text(
-                    "Cosmic Activity",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                  Text(
-                    "Tracks likes and comments on your vibes",
-                    color = Color.Gray,
-                    fontSize = 11.sp
-                  )
-                }
-                IconButton(onClick = { showNotificationsDialog = false }) {
-                  Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
-                }
-              }
-
-              // Divider
-              HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-              Spacer(modifier = Modifier.height(10.dp))
-
-              // Action Bar
-              Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.End
-              ) {
-                TextButton(
-                  onClick = { markNotificationsRead() },
-                  colors = ButtonDefaults.textButtonColors(contentColor = NeonCyan)
+                Text("Rotate:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Button(
+                  onClick = { mediaRotationZ = (mediaRotationZ + 90f) % 360f },
+                  colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f), contentColor = Color.White),
+                  shape = RoundedCornerShape(8.dp)
                 ) {
-                  Text("Mark all as read", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.Refresh, contentDescription = "Rotate icon", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Rotate +90°", fontSize = 11.sp)
+                  }
                 }
               }
 
-              // Notification List Content
-              if (isFetchingNotifications) {
-                // Shimmer notifications list
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                  items(4) {
-                    Row(
-                      modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                      verticalAlignment = Alignment.CenterVertically
+              Spacer(modifier = Modifier.height(14.dp))
+
+              // Aspect Ratio Selector
+              Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Aspect Ratio:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                  listOf("Original", "1:1", "4:5", "5:7", "16:9").forEach { mode ->
+                    val isSel = selectedAspectRatio == mode
+                    Surface(
+                      modifier = Modifier
+                        .weight(1f)
+                        .clickable { selectedAspectRatio = mode },
+                      shape = RoundedCornerShape(8.dp),
+                      color = if (isSel) SoftNeonMint.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.04f),
+                      border = BorderStroke(1.dp, if (isSel) SoftNeonMint else Color.Transparent)
                     ) {
-                      ShimmerPlaceholder(modifier = Modifier.size(38.dp), shape = CircleShape)
-                      Spacer(modifier = Modifier.width(12.dp))
-                      Column(modifier = Modifier.weight(1f)) {
-                        ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp))
-                        Spacer(modifier = Modifier.height(6.dp))
-                        ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.8f).height(10.dp))
+                      Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                        Text(mode, color = if (isSel) SoftNeonMint else Color.LightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                       }
-                      Spacer(modifier = Modifier.width(12.dp))
-                      ShimmerPlaceholder(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(6.dp))
                     }
                   }
                 }
-              } else if (notificationsList.isEmpty()) {
-                Box(
-                  modifier = Modifier.fillMaxSize().weight(1f),
-                  contentAlignment = Alignment.Center
+              }
+
+              Spacer(modifier = Modifier.height(14.dp))
+
+              // Color Filters
+              Column(modifier = Modifier.fillMaxWidth()) {
+                Text("Color Filters:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("🌌", fontSize = 38.sp)
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Deep Space Serenity", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("No social engagements caught in your orbit yet.", color = Color.Gray, fontSize = 11.sp, textAlign = TextAlign.Center)
+                  listOf("Normal", "Cyberpunk", "Mono", "Amber", "Forest").forEach { filt ->
+                    val isSel = selectedMediaFilter == filt
+                    Surface(
+                      modifier = Modifier
+                        .weight(1f)
+                        .clickable { selectedMediaFilter = filt },
+                      shape = RoundedCornerShape(8.dp),
+                      color = if (isSel) NeonCyan.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.04f),
+                      border = BorderStroke(1.dp, if (isSel) NeonCyan else Color.Transparent)
+                    ) {
+                      Box(modifier = Modifier.padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
+                        Text(filt, color = if (isSel) NeonCyan else Color.LightGray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                      }
+                    }
                   }
                 }
-              } else {
-                LazyColumn(
-                  modifier = Modifier.weight(1f),
-                  verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                  items(notificationsList) { notif ->
-                    Row(
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (notif.isRead) Color.White.copy(alpha = 0.02f) else Color.White.copy(alpha = 0.06f))
-                        .border(
-                          width = 1.dp,
-                          color = if (notif.isRead) Color.Transparent else NeonCyan.copy(alpha = 0.2f),
-                          shape = RoundedCornerShape(14.dp)
-                        )
-                        .clickable {
-                          showNotificationsDialog = false
-                          selectedTab = 0
-                          val matchingPost = postsList.find { it.id == notif.targetId }
-                          if (matchingPost != null) {
-                            activePostForComments = matchingPost
-                            loadCommentsForPost(matchingPost.id)
-                          }
-                          scope.launch {
-                            try {
-                              if (!notif.isRead) {
-                                NetworkService.api.markNotificationsRead()
-                                loadNotificationsFromBackend()
-                              }
-                            } catch (e: Exception) {}
-                          }
+              }
+
+              Spacer(modifier = Modifier.height(20.dp))
+
+              // Finish Button
+              Button(
+                onClick = { showMediaEditor = false },
+                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(44.dp)
+              ) {
+                Text("Confirm & Save Edits", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              }
+            }
+          }
+        }
+      }
+
+      // ============================================================================
+      // 🌟 DYNAMIC MODERN NOTIFICATIONS DRAWER OVERLAY
+      // ============================================================================
+      if (showNotificationsDialog) {
+        Surface(
+          modifier = Modifier
+            .fillMaxSize()
+            .clickable(enabled = false) {},
+          color = Color(0xFF13131A)
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxSize()
+              .windowInsetsPadding(WindowInsets.statusBars)
+              .padding(20.dp)
+          ) {
+            // Notification Header
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Column {
+                Text(
+                  "Cosmic Activity",
+                  color = Color.White,
+                  fontSize = 18.sp,
+                  fontWeight = FontWeight.Bold
+                )
+                Text(
+                  "Tracks likes and comments on your vibes",
+                  color = Color.Gray,
+                  fontSize = 11.sp
+                )
+              }
+              IconButton(onClick = { showNotificationsDialog = false }) {
+                Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+              }
+            }
+
+            // Divider
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Action Bar
+            Row(
+              modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+              horizontalArrangement = Arrangement.End
+            ) {
+              TextButton(
+                onClick = { markNotificationsRead() },
+                colors = ButtonDefaults.textButtonColors(contentColor = NeonCyan)
+              ) {
+                Text("Mark all as read", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+
+            // Notification List Content
+            if (isFetchingNotifications) {
+              // Shimmer notifications list
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(4) {
+                  Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    ShimmerPlaceholder(modifier = Modifier.size(38.dp), shape = CircleShape)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                      ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp))
+                      Spacer(modifier = Modifier.height(6.dp))
+                      ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.8f).height(10.dp))
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    ShimmerPlaceholder(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(6.dp))
+                  }
+                }
+              }
+            } else if (notificationsList.isEmpty()) {
+              Box(
+                modifier = Modifier.fillMaxSize().weight(1f),
+                contentAlignment = Alignment.Center
+              ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                  Text("🌌", fontSize = 38.sp)
+                  Spacer(modifier = Modifier.height(10.dp))
+                  Text("Deep Space Serenity", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                  Text("No social engagements caught in your orbit yet.", color = Color.Gray, fontSize = 11.sp, textAlign = TextAlign.Center)
+                }
+              }
+            } else {
+              LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                items(notificationsList) { notif ->
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .clip(RoundedCornerShape(14.dp))
+                      .background(if (notif.isRead) Color.White.copy(alpha = 0.02f) else Color.White.copy(alpha = 0.06f))
+                      .border(
+                        width = 1.dp,
+                        color = if (notif.isRead) Color.Transparent else NeonCyan.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(14.dp)
+                      )
+                      .clickable {
+                        showNotificationsDialog = false
+                        selectedTab = 0
+                        val matchingPost = postsList.find { it.id == notif.targetId }
+                        if (matchingPost != null) {
+                          activePostForComments = matchingPost
+                          loadCommentsForPost(matchingPost.id)
                         }
-                        .padding(12.dp),
-                      verticalAlignment = Alignment.CenterVertically
+                        scope.launch {
+                          try {
+                            if (!notif.isRead) {
+                              NetworkService.api.markNotificationsRead()
+                              loadNotificationsFromBackend()
+                            }
+                          } catch (e: Exception) {}
+                        }
+                      }
+                      .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Box(
+                      modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.05f)),
+                      contentAlignment = Alignment.Center
                     ) {
+                      Text(if (notif.type == "like") "❤️" else "💬", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                      Text(
+                        text = notif.senderDisplayName ?: "Someone",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                      )
+                      val textAction = if (notif.type == "like") "liked your post:" else "commented on your post:"
+                      Text(
+                        text = "$textAction \"${notif.contentPreview ?: ""}\"",
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    if (!notif.postMediaUrl.isNullOrBlank()) {
                       Box(
                         modifier = Modifier
-                          .size(38.dp)
-                          .clip(CircleShape)
-                          .background(Color.White.copy(alpha = 0.05f)),
+                          .size(36.dp)
+                          .clip(RoundedCornerShape(6.dp))
+                          .background(Color.Black)
+                      ) {
+                        AsyncImage(
+                          model = notif.postMediaUrl,
+                          contentDescription = "Post Thumbnail Preview",
+                          modifier = Modifier.fillMaxSize(),
+                          contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                      }
+                    } else {
+                      Box(
+                        modifier = Modifier
+                          .size(36.dp)
+                          .clip(RoundedCornerShape(6.dp))
+                          .background(Color.White.copy(alpha = 0.04f)),
                         contentAlignment = Alignment.Center
                       ) {
-                        Text(if (notif.type == "like") "❤️" else "💬", fontSize = 16.sp)
-                      }
-
-                      Spacer(modifier = Modifier.width(12.dp))
-
-                      Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                          text = notif.senderDisplayName ?: "Someone",
-                          color = Color.White,
-                          fontSize = 13.sp,
-                          fontWeight = FontWeight.Bold
-                        )
-                        val textAction = if (notif.type == "like") "liked your post:" else "commented on your post:"
-                        Text(
-                          text = "$textAction \"${notif.contentPreview ?: ""}\"",
-                          color = Color.LightGray,
-                          fontSize = 11.sp,
-                          maxLines = 2,
-                          overflow = TextOverflow.Ellipsis
-                        )
-                      }
-
-                      Spacer(modifier = Modifier.width(8.dp))
-
-                      if (!notif.postMediaUrl.isNullOrBlank()) {
-                        Box(
-                          modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black)
-                        ) {
-                          AsyncImage(
-                            model = notif.postMediaUrl,
-                            contentDescription = "Post Thumbnail Preview",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                          )
-                        }
-                      } else {
-                        Box(
-                          modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.04f)),
-                          contentAlignment = Alignment.Center
-                        ) {
-                          Text("📝", fontSize = 14.sp)
-                        }
+                        Text("📝", fontSize = 14.sp)
                       }
                     }
                   }
@@ -1368,181 +1929,234 @@ fun SafariSphereApp() {
       // ============================================================================
       if (activePostForComments != null) {
         val post = activePostForComments!!
-        Box(
+        Surface(
           modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.85f))
-            .clickable { activePostForComments = null },
-          contentAlignment = Alignment.Center
+            .testTag("full_comments_page"),
+          color = Color(0xFF0F0F14)
         ) {
-          Surface(
+          Column(
             modifier = Modifier
-              .fillMaxWidth(0.94f)
-              .fillMaxHeight(0.85f)
-              .clickable(enabled = false) {},
-            shape = RoundedCornerShape(24.dp),
-            color = Color(0xFF13131A),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+              .fillMaxSize()
+              .windowInsetsPadding(WindowInsets.statusBars)
+              .navigationBarsPadding()
           ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-              Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Text(
-                    "Sphere Comments",
-                    color = NeonCyan,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                  )
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Box(
-                    modifier = Modifier
-                      .clip(RoundedCornerShape(10.dp))
-                      .background(NeonCyan.copy(alpha = 0.15f))
-                      .padding(horizontal = 6.dp, vertical = 2.dp)
-                  ) {
-                    Text(
-                      post.commentsCount.toString(),
-                      color = NeonCyan,
-                      fontSize = 10.sp,
-                      fontWeight = FontWeight.Bold
-                    )
-                  }
-                }
+            // Full Screen Toolbar
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { activePostForComments = null }) {
-                  Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                  Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = "Back to Feed",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                  )
                 }
-              }
-
-              HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-
-              Spacer(modifier = Modifier.height(8.dp))
-
-              // Context Header
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .clip(RoundedCornerShape(12.dp))
-                  .background(Color.White.copy(alpha = 0.03f))
-                  .padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                  "Sphere Comments",
+                  color = NeonCyan,
+                  fontSize = 18.sp,
+                  fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Box(
                   modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(NeonCyan.copy(alpha = 0.1f)),
-                  contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(NeonCyan.copy(alpha = 0.15f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
-                  Text("🦁", fontSize = 14.sp)
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                  Text(post.author, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                  Text(post.content, color = Color.LightGray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text(
+                    post.commentsCount.toString(),
+                    color = NeonCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                  )
                 }
               }
+            }
 
-              Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
 
-              if (isFetchingComments) {
-                LazyColumn(
-                  modifier = Modifier.weight(1f),
-                  verticalArrangement = Arrangement.spacedBy(12.dp)
+            // Enhanced Context Header showing parent post being commented on
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White.copy(alpha = 0.04f))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), RoundedCornerShape(16.dp))
+                .padding(14.dp),
+              verticalAlignment = Alignment.Top
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(38.dp)
+                  .clip(CircleShape)
+                  .background(NeonCyan.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(if (post.author.contains("Lion") || post.author.contains("Prime")) "🦁" else "🐆", fontSize = 16.sp)
+              }
+              Spacer(modifier = Modifier.width(12.dp))
+              Column(modifier = Modifier.weight(1f)) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  modifier = Modifier.fillMaxWidth()
                 ) {
-                  items(3) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                      ShimmerPlaceholder(modifier = Modifier.size(32.dp), shape = CircleShape)
-                      Spacer(modifier = Modifier.width(10.dp))
-                      Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                          ShimmerPlaceholder(modifier = Modifier.width(80.dp).height(12.dp))
-                          Spacer(modifier = Modifier.width(8.dp))
-                          ShimmerPlaceholder(modifier = Modifier.width(40.dp).height(10.dp))
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(14.dp))
+                  Text(post.author, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                  Text("@${post.username}", color = Color.Gray, fontSize = 11.sp)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                val (postBodyText, _) = parsePostMetadata(post.content)
+                Text(
+                  postBodyText,
+                  color = Color.LightGray,
+                  fontSize = 13.sp,
+                  lineHeight = 18.sp
+                )
+              }
+            }
+
+            Text(
+              "All Chimes",
+              color = Color.White.copy(alpha = 0.5f),
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+            )
+
+            // Scrollable Comments List
+            if (isFetchingComments) {
+              LazyColumn(
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+              ) {
+                items(3) {
+                  Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    ShimmerPlaceholder(modifier = Modifier.size(32.dp), shape = CircleShape)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                        ShimmerPlaceholder(modifier = Modifier.width(80.dp).height(12.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        ShimmerPlaceholder(modifier = Modifier.width(40.dp).height(10.dp))
                       }
+                      Spacer(modifier = Modifier.height(6.dp))
+                      ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(14.dp))
                     }
                   }
                 }
-              } else if (commentsListForActivePost.isEmpty()) {
-                Box(
-                  modifier = Modifier.weight(1f).fillMaxWidth(),
-                  contentAlignment = Alignment.Center
-                ) {
-                  Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("📣", fontSize = 32.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("No frequencies detected yet", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    Text("Be the first to chime in!", color = Color.Gray, fontSize = 11.sp)
-                  }
+              }
+            } else if (commentsListForActivePost.isEmpty()) {
+              Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
+              ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                  Text("📣", fontSize = 32.sp)
+                  Spacer(modifier = Modifier.height(8.dp))
+                  Text("No frequencies detected yet", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                  Text("Be the first to chime in!", color = Color.Gray, fontSize = 11.sp)
                 }
-              } else {
-                LazyColumn(
-                  modifier = Modifier.weight(1f),
-                  verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                  val parentComments = commentsListForActivePost.filter { it.parentId == null }
-                  items(parentComments) { pComm ->
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                      Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Box(
-                          modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.05f)),
-                          contentAlignment = Alignment.Center
-                        ) {
-                          Text("🦁", fontSize = 13.sp)
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                          Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
-                          ) {
-                            Text(pComm.displayName ?: pComm.username ?: "Pioneer", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Text(pComm.createdAt ?: "Just now", color = Color.Gray, fontSize = 10.sp)
-                          }
-                          Text(pComm.content, color = Color(0xFFECEFF1), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+              }
+            } else {
+              LazyColumn(
+                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                val parentComments = commentsListForActivePost.filter { it.parentId == null }
+                items(parentComments) { pComm ->
+                  Column(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .clip(RoundedCornerShape(16.dp))
+                      .background(Color.White.copy(alpha = 0.02f))
+                      .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)), RoundedCornerShape(16.dp))
+                      .padding(12.dp)
+                  ) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                      Box(
+                        modifier = Modifier
+                          .size(34.dp)
+                          .clip(CircleShape)
+                          .background(Color.White.copy(alpha = 0.05f)),
+                        contentAlignment = Alignment.Center
+                      ) {
+                        if (!pComm.avatarUrl.isNullOrBlank()) {
+                          AsyncImage(
+                            model = pComm.avatarUrl,
+                            contentDescription = "avatar",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                          )
+                        } else {
+                          Text(if (pComm.displayName?.contains("Luna") == true) "✨" else "👽", fontSize = 14.sp)
                         }
                       }
+                      Spacer(modifier = Modifier.width(10.dp))
+                      Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                          verticalAlignment = Alignment.CenterVertically,
+                          horizontalArrangement = Arrangement.SpaceBetween,
+                          modifier = Modifier.fillMaxWidth()
+                        ) {
+                          Text(pComm.displayName ?: pComm.username ?: "Pioneer", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                          Text(pComm.createdAt ?: "Just now", color = Color.Gray, fontSize = 10.sp)
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(pComm.content, color = Color(0xFFECEFF1), fontSize = 13.sp, lineHeight = 18.sp)
+                      }
+                    }
 
-                      val subComments = commentsListForActivePost.filter { it.parentId == pComm.id }
+                    // Replies nested inside the parent card cleanly
+                    val subComments = commentsListForActivePost.filter { it.parentId == pComm.id }
+                    if (subComments.isNotEmpty()) {
+                      Spacer(modifier = Modifier.height(8.dp))
                       subComments.forEach { subComm ->
                         Row(
                           modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 24.dp, top = 6.dp, bottom = 4.dp)
-                            .background(Color.White.copy(alpha = 0.02f))
-                            .border(BorderStroke(1.dp, NeonCyan.copy(alpha = 0.1f)), RoundedCornerShape(10.dp))
-                            .padding(8.dp)
+                            .padding(start = 20.dp, top = 6.dp)
+                            .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                            .border(BorderStroke(1.dp, NeonCyan.copy(alpha = 0.15f)), RoundedCornerShape(12.dp))
+                            .padding(10.dp)
                         ) {
                           Box(
                             modifier = Modifier
-                              .size(24.dp)
+                              .size(26.dp)
                               .clip(CircleShape)
                               .background(Color.White.copy(alpha = 0.05f)),
                             contentAlignment = Alignment.Center
                           ) {
-                            Text("🐆", fontSize = 10.sp)
+                            if (!subComm.avatarUrl.isNullOrBlank()) {
+                              AsyncImage(
+                                model = subComm.avatarUrl,
+                                contentDescription = "avatar",
+                                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                              )
+                            } else {
+                              Text("🐆", fontSize = 11.sp)
+                            }
                           }
-                          Spacer(modifier = Modifier.width(8.dp))
-                          Column {
+                          Spacer(modifier = Modifier.width(10.dp))
+                          Column(modifier = Modifier.weight(1f)) {
                             Row(
                               verticalAlignment = Alignment.CenterVertically,
                               horizontalArrangement = Arrangement.SpaceBetween,
                               modifier = Modifier.fillMaxWidth()
                             ) {
-                              Text(subComm.displayName ?: subComm.username ?: "Explorer", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                              Text(subComm.displayName ?: subComm.username ?: "Explorer", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                               Text(subComm.createdAt ?: "Just now", color = Color.Gray, fontSize = 9.sp)
                             }
-                            Text(subComm.content, color = Color(0xFFECEFF1), fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(subComm.content, color = Color(0xFFECEFF1), fontSize = 12.sp, lineHeight = 16.sp)
                           }
                         }
                       }
@@ -1550,57 +2164,64 @@ fun SafariSphereApp() {
                   }
                 }
               }
+            }
 
-              Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .clip(RoundedCornerShape(16.dp))
-                  .background(Color.Black.copy(alpha = 0.4f))
-                  .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(16.dp))
-                  .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                listOf("🦁", "🔥", "✨").forEach { emoji ->
-                  Box(
-                    modifier = Modifier
-                      .size(28.dp)
-                      .clip(CircleShape)
-                      .clickable { typingCommentText += emoji }
-                      .padding(2.dp),
-                    contentAlignment = Alignment.Center
-                  ) {
-                    Text(emoji, fontSize = 14.sp)
-                  }
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                BasicTextField(
-                  value = typingCommentText,
-                  onValueChange = { typingCommentText = it },
-                  textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+            // Message Composer Footer
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(alpha = 0.4f))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(16.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              listOf("🦁", "🔥", "✨").forEach { emoji ->
+                Box(
                   modifier = Modifier
-                    .weight(1f)
-                    .testTag("comment_input_text")
-                    .padding(vertical = 8.dp),
-                  decorationBox = { innerTextField ->
-                    if (typingCommentText.isEmpty()) {
-                      Text("Beam your thoughts...", color = Color.Gray, fontSize = 13.sp)
-                    }
-                    innerTextField()
-                  }
-                )
-
-                IconButton(
-                  onClick = {
-                    if (typingCommentText.isNotBlank()) {
-                      postComment(post.id, typingCommentText)
-                    }
-                  },
-                  modifier = Modifier.testTag("submit_comment_btn")
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable { typingCommentText += emoji }
+                    .padding(2.dp),
+                  contentAlignment = Alignment.Center
                 ) {
+                  Text(emoji, fontSize = 14.sp)
+                }
+              }
+
+              Spacer(modifier = Modifier.width(6.dp))
+
+              BasicTextField(
+                value = typingCommentText,
+                onValueChange = { typingCommentText = it },
+                textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("comment_input_text")
+                  .padding(vertical = 8.dp),
+                decorationBox = { innerTextField ->
+                  if (typingCommentText.isEmpty()) {
+                    Text("Beam your thoughts...", color = Color.Gray, fontSize = 13.sp)
+                  }
+                  innerTextField()
+                }
+              )
+
+              IconButton(
+                onClick = {
+                  if (typingCommentText.isNotBlank()) {
+                    postComment(post.id, typingCommentText)
+                  }
+                },
+                enabled = !isPostingComment,
+                modifier = Modifier.testTag("submit_comment_btn")
+              ) {
+                if (isPostingComment) {
+                  CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
                   Icon(
                     imageVector = Icons.Default.Send,
                     contentDescription = "Send Comment",
@@ -1613,7 +2234,6 @@ fun SafariSphereApp() {
           }
         }
       }
-
     }
   }
 }
@@ -1626,11 +2246,40 @@ fun SafariSphereApp() {
 fun FeedTab(
   moments: List<MobileMoment>,
   posts: List<MobilePost>,
+  isFetchingPosts: Boolean = false,
+  onScrollDirectionChanged: (Boolean) -> Unit,
   onLikeClicked: (MobilePost) -> Unit,
   onMomentClicked: (MobileMoment) -> Unit,
   onCommentClicked: (MobilePost) -> Unit
 ) {
+  val listState = rememberLazyListState()
+
+  LaunchedEffect(listState) {
+    var previousIndex = 0
+    var previousScrollOffset = 0
+    snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+      .collect { (currentIndex, currentScrollOffset) ->
+        if (currentIndex > previousIndex) {
+          // Scrolled down
+          onScrollDirectionChanged(false)
+        } else if (currentIndex < previousIndex) {
+          // Scrolled up
+          onScrollDirectionChanged(true)
+        } else {
+          // Same item index, inspect pixel offset with soft tolerance
+          if (currentScrollOffset > previousScrollOffset + 5) {
+            onScrollDirectionChanged(false)
+          } else if (currentScrollOffset < previousScrollOffset - 5) {
+            onScrollDirectionChanged(true)
+          }
+        }
+        previousIndex = currentIndex
+        previousScrollOffset = currentScrollOffset
+      }
+  }
+
   LazyColumn(
+    state = listState,
     modifier = Modifier.fillMaxSize(),
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -1957,7 +2606,36 @@ fun FeedTab(
     }
 
     // Dynamic Social Post Feed
-    items(posts) { post ->
+    if (isFetchingPosts && posts.isEmpty()) {
+      items(3) {
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp),
+          color = GlassyCard.copy(alpha = 0.5f),
+          shape = RoundedCornerShape(24.dp),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+        ) {
+          Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              ShimmerPlaceholder(modifier = Modifier.size(42.dp), shape = CircleShape)
+              Spacer(modifier = Modifier.width(12.dp))
+              Column {
+                ShimmerPlaceholder(modifier = Modifier.width(100.dp).height(14.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+                ShimmerPlaceholder(modifier = Modifier.width(60.dp).height(10.dp))
+              }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.7f).height(14.dp))
+          }
+        }
+      }
+    } else {
+      items(posts) { post ->
+        val (cleanContent, metadata) = remember(post.content) { parsePostMetadata(post.content) }
       Surface(
         modifier = Modifier
           .fillMaxWidth()
@@ -2017,7 +2695,7 @@ fun FeedTab(
 
           // Body Content Text
           Text(
-            post.content,
+            cleanContent,
             color = Color(0xFFECEFF1),
             fontSize = 14.sp,
             lineHeight = 20.sp
@@ -2025,15 +2703,26 @@ fun FeedTab(
 
           if (!post.mediaUrl.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(12.dp))
+
+            val mediaModifier = Modifier
+              .fillMaxWidth()
+              .then(
+                when (metadata.ratio) {
+                  "1:1" -> Modifier.aspectRatio(1f)
+                  "4:5" -> Modifier.aspectRatio(0.8f)
+                  "5:7" -> Modifier.aspectRatio(5f / 7f)
+                  "16:9" -> Modifier.aspectRatio(16f / 9f)
+                  else -> Modifier.wrapContentHeight().heightIn(max = 450.dp)
+                }
+              )
+              .graphicsLayer(rotationZ = metadata.rotation)
+              .clip(RoundedCornerShape(16.dp))
+              .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+
             if (post.mediaType == "video") {
-              // Video Player Mock card
+              // Video Player Mock card with dynamic ratio modifier applied
               Box(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(180.dp)
-                  .clip(RoundedCornerShape(16.dp))
-                  .background(Color.Black)
-                  .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                modifier = mediaModifier.background(Color.Black),
                 contentAlignment = Alignment.Center
               ) {
                 val videoThumbnail = if (!post.mediaUrl.contains("mixkit")) {
@@ -2045,7 +2734,8 @@ fun FeedTab(
                   model = videoThumbnail,
                   contentDescription = "Video Thumbnail",
                   modifier = Modifier.fillMaxSize().alpha(0.6f),
-                  contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                  contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                  colorFilter = getComposeColorFilter(metadata.filter ?: "")
                 )
 
                 var isPlaying by remember { mutableStateOf(false) }
@@ -2090,21 +2780,14 @@ fun FeedTab(
                 }
               }
             } else {
-              // Image card load via AsyncImage
-              Box(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .height(180.dp)
-                  .clip(RoundedCornerShape(16.dp))
-                  .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
-              ) {
-                AsyncImage(
-                  model = post.mediaUrl,
-                  contentDescription = "Post Media Image Attachment",
-                  modifier = Modifier.fillMaxSize(),
-                  contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                )
-              }
+              // Image card load via AsyncImage with dynamic aspect ratio, rotation, and filter mapping
+              AsyncImage(
+                model = post.mediaUrl,
+                contentDescription = "Post Media Image Attachment",
+                modifier = mediaModifier,
+                contentScale = if (metadata.ratio == null || metadata.ratio == "Original") androidx.compose.ui.layout.ContentScale.Fit else androidx.compose.ui.layout.ContentScale.Crop,
+                colorFilter = getComposeColorFilter(metadata.filter ?: "")
+              )
             }
           }
 
@@ -2173,6 +2856,7 @@ fun FeedTab(
     }
   }
 }
+}
 
 // ==============================================================================
 // 2. LIVE VYBE ROOMS TAB
@@ -2180,6 +2864,7 @@ fun FeedTab(
 @Composable
 fun RoomsTab(
   rooms: List<MobileRoom>,
+  isFetchingRooms: Boolean = false,
   onJoinRoom: (MobileRoom) -> Unit
 ) {
   var joinedRoomId by remember { mutableStateOf<String?>(null) }
@@ -2209,7 +2894,29 @@ fun RoomsTab(
         }
       }
 
-      items(rooms) { room ->
+      if (isFetchingRooms && rooms.isEmpty()) {
+        items(3) {
+          Surface(
+            modifier = Modifier.fillMaxWidth().height(140.dp),
+            color = GlassyCard.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              ShimmerPlaceholder(modifier = Modifier.width(160.dp).height(16.dp))
+              Spacer(modifier = Modifier.height(10.dp))
+              ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(12.dp))
+              Spacer(modifier = Modifier.height(6.dp))
+              ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.6f).height(12.dp))
+              Spacer(modifier = Modifier.height(16.dp))
+              Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                ShimmerPlaceholder(modifier = Modifier.width(80.dp).height(28.dp))
+              }
+            }
+          }
+        }
+      } else {
+        items(rooms) { room ->
         Surface(
           modifier = Modifier
             .fillMaxWidth()
@@ -2303,12 +3010,13 @@ fun RoomsTab(
                 colors = ButtonDefaults.buttonColors(containerColor = BentoIndigo, contentColor = Color.White),
                 shape = RoundedCornerShape(16.dp)
               ) {
-                Text("Join Vybe", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Join Sphere", fontSize = 12.sp, fontWeight = FontWeight.Bold)
               }
             }
           }
         }
       }
+    }
     }
   } else {
     // ACTIVE JOINED VYBE ROOM CHAT INTERFACE
@@ -2481,13 +3189,32 @@ fun AICompanionTab(
       )
 
       if (isFetchingExplorers) {
-        Box(
+        LazyRow(
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
           modifier = Modifier
             .fillMaxWidth()
-            .height(110.dp),
-          contentAlignment = Alignment.Center
+            .padding(bottom = 16.dp)
         ) {
-          CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(24.dp))
+          items(3) {
+            Surface(
+              modifier = Modifier
+                .width(140.dp)
+                .height(110.dp),
+              color = GlassyCard.copy(alpha = 0.5f),
+              shape = RoundedCornerShape(18.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+            ) {
+              Column(
+                modifier = Modifier.padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+              ) {
+                ShimmerPlaceholder(modifier = Modifier.size(38.dp), shape = CircleShape)
+                Spacer(modifier = Modifier.height(10.dp))
+                ShimmerPlaceholder(modifier = Modifier.width(70.dp).height(12.dp))
+              }
+            }
+          }
         }
       } else {
         LazyRow(
@@ -2556,13 +3283,27 @@ fun AICompanionTab(
       )
 
       if (isFetchingChats) {
-        Box(
+        Column(
           modifier = Modifier
+            .weight(1f)
             .fillMaxWidth()
-            .weight(1f),
-          contentAlignment = Alignment.Center
+            .padding(vertical = 8.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-          CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(24.dp))
+          repeat(4) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.fillMaxWidth()
+            ) {
+              ShimmerPlaceholder(modifier = Modifier.size(46.dp), shape = CircleShape)
+              Spacer(modifier = Modifier.width(12.dp))
+              Column(modifier = Modifier.weight(1f)) {
+                ShimmerPlaceholder(modifier = Modifier.width(130.dp).height(14.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+                ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.7f).height(10.dp))
+              }
+            }
+          }
         }
       } else {
         LazyColumn(
@@ -3306,7 +4047,10 @@ fun IdentityTab(
   interests: String,
   onMoodSelected: (String, String) -> Unit,
   onProfileUpdated: (nickname: String, bio: String, location: String, avatarUrl: String, handle: String, email: String, headline: String, interests: String) -> Unit,
-  onLogOut: () -> Unit
+  onLogOut: () -> Unit,
+  forceShowSettings: Boolean = false,
+  onDismissSettings: () -> Unit = {},
+  isFetchingProfile: Boolean = false
 ) {
   val context = LocalContext.current
   val prefs = remember { context.getSharedPreferences("safari_sphere_prefs", android.content.Context.MODE_PRIVATE) }
@@ -3321,8 +4065,23 @@ fun IdentityTab(
   var editHeadlineInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_headline", headline) ?: headline else headline) }
   var editInterestsInput by remember { mutableStateOf(if (hasDraft) prefs.getString("draft_interests", interests) ?: interests else interests) }
 
+  val avatarPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+  ) { uri ->
+    if (uri != null) {
+      editAvatarInput = uri.toString()
+    }
+  }
+
   var showSelectMoodDialog by remember { mutableStateOf(false) }
   var showEditProfileDialog by remember { mutableStateOf(false) }
+
+  LaunchedEffect(forceShowSettings) {
+    if (forceShowSettings) {
+      showEditProfileDialog = true
+      onDismissSettings()
+    }
+  }
 
   var lastAutoSaveTime by remember { mutableStateOf("") }
 
@@ -3353,9 +4112,49 @@ fun IdentityTab(
     contentPadding = PaddingValues(16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // Hero profile visual banner card in Bento Style
-    item {
-      Surface(
+    if (isFetchingProfile) {
+      item {
+        Surface(
+          modifier = Modifier.fillMaxWidth().shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp)),
+          color = GlassyCard,
+          shape = RoundedCornerShape(24.dp),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        ) {
+          Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            ShimmerPlaceholder(modifier = Modifier.size(92.dp), shape = CircleShape)
+            Spacer(modifier = Modifier.height(14.dp))
+            ShimmerPlaceholder(modifier = Modifier.width(150.dp).height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            ShimmerPlaceholder(modifier = Modifier.width(90.dp).height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+              ShimmerPlaceholder(modifier = Modifier.width(70.dp).height(14.dp))
+              ShimmerPlaceholder(modifier = Modifier.width(70.dp).height(14.dp))
+            }
+          }
+        }
+      }
+      items(2) {
+        Surface(
+          modifier = Modifier.fillMaxWidth().height(80.dp),
+          color = GlassyCard.copy(alpha = 0.5f),
+          shape = RoundedCornerShape(16.dp),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+        ) {
+          Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
+            ShimmerPlaceholder(modifier = Modifier.width(110.dp).height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.5f).height(10.dp))
+          }
+        }
+      }
+    } else {
+      // Hero profile visual banner card in Bento Style
+      item {
+        Surface(
         modifier = Modifier
           .fillMaxWidth()
           .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp)),
@@ -3479,20 +4278,7 @@ fun IdentityTab(
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
-              text = if (!joinDate.isNullOrEmpty()) {
-                val formattedDate = try {
-                  if (joinDate.contains("T")) {
-                    joinDate.split("T")[0]
-                  } else {
-                    joinDate
-                  }
-                } catch (e: Exception) {
-                  joinDate
-                }
-                "Joined: $formattedDate"
-              } else {
-                "Joined: Early Alpha"
-              },
+              text = formatJoinedDateString(joinDate),
               color = Color.Gray,
               fontSize = 11.sp
             )
@@ -3724,6 +4510,7 @@ fun IdentityTab(
       }
     }
   }
+}
 
   // ----------------------------------------------------------------------------
   // MOOD SELECTOR DROPDOWN POPUP
@@ -3808,33 +4595,25 @@ fun IdentityTab(
   )
 
   if (showEditProfileDialog) {
-    Box(
+    Surface(
       modifier = Modifier
         .fillMaxSize()
-        .background(Color.Black.copy(alpha = 0.82f))
-        .clickable { showEditProfileDialog = false },
-      contentAlignment = Alignment.Center
+        .testTag("full_edit_profile_page"),
+      color = Color(0xFF0F0F14)
     ) {
-      Surface(
+      Column(
         modifier = Modifier
-          .fillMaxWidth(0.92f)
-          .fillMaxHeight(0.85f)
-          .clickable(enabled = false) {},
-        color = GlassyCard,
-        shape = RoundedCornerShape(26.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.09f))
+          .fillMaxSize()
+          .windowInsetsPadding(WindowInsets.statusBars)
+          .navigationBarsPadding()
+          .padding(16.dp)
       ) {
-        Column(
-          modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp)
+        // Full Screen Header
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          // Dialog Header
-          Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
             Text(
               text = "Adapt Identity Synthesis",
               color = NeonCyan,
@@ -3851,11 +4630,11 @@ fun IdentityTab(
                 modifier = Modifier
                   .size(6.dp)
                   .clip(CircleShape)
-                  .background(if (lastAutoSaveTime.isNotEmpty()) SoftNeonMint else Color.Gray)
+                  .background(SoftNeonMint)
               )
               Spacer(modifier = Modifier.width(4.dp))
               Text(
-                text = if (lastAutoSaveTime.isNotEmpty()) "Draft saved at $lastAutoSaveTime" else "Auto-save active (5s)",
+                text = "Security Shield Engaged",
                 color = Color.Gray,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold
@@ -4369,20 +5148,38 @@ fun IdentityTab(
               }
 
               item {
-                Text("Avatar Custom URL", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                OutlinedTextField(
-                  value = editAvatarInput,
-                  onValueChange = { editAvatarInput = it },
-                  colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonCyan,
-                    unfocusedBorderColor = Color.DarkGray,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                  ),
+                Text("Custom Profile Picture", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                  onClick = { avatarPickerLauncher.launch("image/*") },
+                  colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
                   shape = RoundedCornerShape(12.dp),
-                  modifier = Modifier.fillMaxWidth().testTag("edit_avatar_input"),
-                  singleLine = true
-                )
+                  modifier = Modifier.fillMaxWidth().height(44.dp)
+                ) {
+                  Icon(imageVector = Icons.Default.AccountBox, contentDescription = "Pick Avatar Icon", modifier = Modifier.size(16.dp))
+                  Spacer(modifier = Modifier.width(8.dp))
+                  Text("Pick Picture from local storage", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                
+                if (editAvatarInput.isNotEmpty() && !avatarPresets.contains(editAvatarInput)) {
+                  Spacer(modifier = Modifier.height(10.dp))
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp)).padding(8.dp)
+                  ) {
+                    Box(
+                      modifier = Modifier.size(40.dp).clip(CircleShape).border(1.dp, NeonCyan, CircleShape)
+                    ) {
+                      AsyncImage(
+                        model = editAvatarInput,
+                        contentDescription = "Selected Local Picture Preview",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                      )
+                    }
+                    Text("✓ Local Storage Chosen", color = SoftNeonMint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
               }
             }
           }
@@ -4546,7 +5343,6 @@ fun IdentityTab(
       }
     }
   }
-}
 
 // ==============================================================================
 // 🌟 STORY VIEWER OVERLAY COMPOSABLE
@@ -4841,7 +5637,8 @@ fun BentoAuthScreen(
           colors = listOf(DeepObsidian, Color(0xFF101014), DeepObsidian)
         )
       )
-      .padding(16.dp),
+      .padding(16.dp)
+      .imePadding(),
     contentAlignment = Alignment.Center
   ) {
     LazyColumn(
@@ -5023,7 +5820,45 @@ fun BentoAuthScreen(
                   .testTag("login_submit_button")
               ) {
                 if (isLoading) {
-                  CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                  ) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "login_loading")
+                    val alpha1 by infiniteTransition.animateFloat(
+                      initialValue = 0.2f,
+                      targetValue = 1f,
+                      animationSpec = infiniteRepeatable(
+                        animation = tween(600, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                      ),
+                      label = "d1"
+                    )
+                    val alpha2 by infiniteTransition.animateFloat(
+                      initialValue = 0.2f,
+                      targetValue = 1f,
+                      animationSpec = infiniteRepeatable(
+                        animation = tween(600, delayMillis = 200, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                      ),
+                      label = "d2"
+                    )
+                    val alpha3 by infiniteTransition.animateFloat(
+                      initialValue = 0.2f,
+                      targetValue = 1f,
+                      animationSpec = infiniteRepeatable(
+                        animation = tween(600, delayMillis = 400, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                      ),
+                      label = "d3"
+                    )
+                    Text("Authenticating Frequencies  ", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = alpha1)))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = alpha2)))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = alpha3)))
+                  }
                 } else {
                   Text("Verify Credentials & Enter", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
@@ -5821,7 +6656,45 @@ fun BentoAuthScreen(
                   .testTag("signup_submit_button")
               ) {
                 if (isLoading) {
-                  CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp))
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                  ) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "signup_loading")
+                    val alpha1 by infiniteTransition.animateFloat(
+                      initialValue = 0.2f,
+                      targetValue = 1f,
+                      animationSpec = infiniteRepeatable(
+                        animation = tween(600, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                      ),
+                      label = "s1"
+                    )
+                    val alpha2 by infiniteTransition.animateFloat(
+                      initialValue = 0.2f,
+                      targetValue = 1f,
+                      animationSpec = infiniteRepeatable(
+                        animation = tween(600, delayMillis = 200, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                      ),
+                      label = "s2"
+                    )
+                    val alpha3 by infiniteTransition.animateFloat(
+                      initialValue = 0.2f,
+                      targetValue = 1f,
+                      animationSpec = infiniteRepeatable(
+                        animation = tween(600, delayMillis = 400, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                      ),
+                      label = "s3"
+                    )
+                    Text("Synthesizing Profile DNA  ", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = alpha1)))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = alpha2)))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = alpha3)))
+                  }
                 } else {
                   Text(
                     text = "Synthesize Explorer Profile",
@@ -5949,3 +6822,225 @@ fun ShimmerPlaceholder(
       .background(Color.White.copy(alpha = alpha))
   )
 }
+
+// ----------------------------------------------------------------------------
+// 🌀 MODERN NEON ORBIT PULL-TO-REFRESH COMPONENT
+// ----------------------------------------------------------------------------
+@Composable
+fun ModernPullToRefresh(
+  isRefreshing: Boolean,
+  onRefresh: () -> Unit,
+  content: @Composable () -> Unit
+) {
+  var pullOffset by remember { mutableStateOf(0f) }
+  val maxPullOffset = 260f
+  val coroutineScope = rememberCoroutineScope()
+  
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .pointerInput(isRefreshing) {
+        if (isRefreshing) return@pointerInput
+        detectVerticalDragGestures(
+          onDragStart = {},
+          onDragEnd = {
+            if (pullOffset > 140f) {
+              onRefresh()
+            }
+            coroutineScope.launch {
+              androidx.compose.animation.core.animate(
+                initialValue = pullOffset,
+                targetValue = 0f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+              ) { value, _ ->
+                pullOffset = value
+              }
+            }
+          },
+          onDragCancel = {
+            coroutineScope.launch {
+              androidx.compose.animation.core.animate(
+                initialValue = pullOffset,
+                targetValue = 0f
+              ) { value, _ ->
+                pullOffset = value
+              }
+            }
+          },
+          onVerticalDrag = { change, dragAmount ->
+            change.consume()
+            val newOffset = (pullOffset + dragAmount * 0.45f).coerceIn(0f, maxPullOffset)
+            pullOffset = newOffset
+          }
+        )
+      }
+  ) {
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .graphicsLayer {
+          translationY = if (isRefreshing) 110f else pullOffset
+        }
+    ) {
+      content()
+    }
+     
+    if (pullOffset > 8f || isRefreshing) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.TopCenter)
+          .padding(top = 12.dp)
+          .graphicsLayer {
+            translationY = if (isRefreshing) 0f else (pullOffset - 80f).coerceAtLeast(0f)
+            alpha = (pullOffset / 90f).coerceIn(0f, 1f)
+            scaleX = (pullOffset / 140f).coerceIn(0.6f, 1.1f)
+            scaleY = (pullOffset / 140f).coerceIn(0.6f, 1.1f)
+          }
+          .background(Color(0xFF12121A), RoundedCornerShape(20.dp))
+          .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+          .padding(horizontal = 14.dp, vertical = 7.dp)
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          val transition = rememberInfiniteTransition(label = "pull_ref")
+          val rotationAngle by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+              animation = tween(1200, easing = LinearEasing),
+              repeatMode = RepeatMode.Restart
+            ),
+            label = "spin"
+          )
+          
+          Icon(
+            imageVector = Icons.Default.Refresh,
+            contentDescription = "Sync",
+            tint = NeonCyan,
+            modifier = Modifier
+              .size(16.dp)
+              .graphicsLayer { rotationZ = rotationAngle }
+          )
+          Text(
+            text = if (isRefreshing) "Attuning Sphere Channels..." else "Swipe down to Attune",
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+          )
+        }
+      }
+    }
+  }
+}
+
+// FORMAT JOINED TIME ON PROFILE
+// Includes name of the month (letters) and the year, e.g. "June 2026"
+fun formatJoinedDateString(joinDate: String?): String {
+  if (joinDate.isNullOrEmpty()) return "Joined: Early Alpha"
+  return try {
+    val cleanDate = if (joinDate.contains("T")) joinDate.split("T")[0] else joinDate
+    val parts = cleanDate.split("-")
+    if (parts.size >= 2) {
+      val year = parts[0]
+      val monthNum = parts[1].toIntOrNull() ?: 1
+      val monthName = when (monthNum) {
+        1 -> "January"
+        2 -> "February"
+        3 -> "March"
+        4 -> "April"
+        5 -> "May"
+        6 -> "June"
+        7 -> "July"
+        8 -> "August"
+        9 -> "September"
+        10 -> "October"
+        11 -> "November"
+        12 -> "December"
+        else -> "January"
+      }
+      "Joined: $monthName $year"
+    } else {
+      "Joined: $joinDate"
+    }
+  } catch (e: Exception) {
+    "Joined: $joinDate"
+  }
+}
+
+// LOCAL CREDENTIAL STORAGE FOR PASSWORD RECOVERY
+fun saveLocalUserCredential(context: Context, handleOrEmail: String, pass: String) {
+  val prefs = context.getSharedPreferences("safari_sphere_auth_db", Context.MODE_PRIVATE)
+  prefs.edit()
+    .putString("pass_${handleOrEmail.trim().lowercase()}", pass)
+    .apply()
+}
+
+fun getLocalUserCredential(context: Context, handleOrEmail: String): String? {
+  val prefs = context.getSharedPreferences("safari_sphere_auth_db", Context.MODE_PRIVATE)
+  return prefs.getString("pass_${handleOrEmail.trim().lowercase()}", null)
+}
+
+// LOCAL POST PERSISTENCE
+fun savePostToLocalStorage(context: Context, post: MobilePost) {
+  val prefs = context.getSharedPreferences("safari_sphere_local_db", Context.MODE_PRIVATE)
+  val postsJsonStr = prefs.getString("local_posts", "[]") ?: "[]"
+  try {
+    val array = org.json.JSONArray(postsJsonStr)
+    val obj = org.json.JSONObject()
+    obj.put("id", post.id)
+    obj.put("author", post.author)
+    obj.put("username", post.username)
+    obj.put("avatarUrl", post.avatarUrl)
+    obj.put("content", post.content)
+    obj.put("vibeCategory", post.vibeCategory)
+    obj.put("likes", post.likes)
+    obj.put("hasLiked", post.hasLiked)
+    obj.put("created", post.created)
+    obj.put("mediaUrl", post.mediaUrl ?: "")
+    obj.put("mediaType", post.mediaType)
+    obj.put("commentsCount", post.commentsCount)
+    
+    val newArray = org.json.JSONArray()
+    newArray.put(obj)
+    for (i in 0 until array.length()) {
+      newArray.put(array.getJSONObject(i))
+    }
+    prefs.edit().putString("local_posts", newArray.toString()).apply()
+  } catch (e: Exception) {
+    e.printStackTrace()
+  }
+}
+
+fun getLocalStoredPosts(context: Context): List<MobilePost> {
+  val prefs = context.getSharedPreferences("safari_sphere_local_db", Context.MODE_PRIVATE)
+  val postsJsonStr = prefs.getString("local_posts", "[]") ?: "[]"
+  val list = mutableListOf<MobilePost>()
+  try {
+    val array = org.json.JSONArray(postsJsonStr)
+    for (i in 0 until array.length()) {
+      val obj = array.getJSONObject(i)
+      list.add(
+        MobilePost(
+          id = obj.getString("id"),
+          author = obj.getString("author"),
+          username = obj.getString("username"),
+          avatarUrl = obj.getString("avatarUrl"),
+          content = obj.getString("content"),
+          vibeCategory = obj.getString("vibeCategory"),
+          likes = obj.getInt("likes"),
+          hasLiked = obj.getBoolean("hasLiked"),
+          created = obj.getString("created"),
+          mediaUrl = obj.optString("mediaUrl", "").takeIf { it.isNotEmpty() },
+          mediaType = obj.getString("mediaType"),
+          commentsCount = obj.getInt("commentsCount")
+        )
+      )
+    }
+  } catch (e: Exception) {
+    e.printStackTrace()
+  }
+  return list
+}
+
