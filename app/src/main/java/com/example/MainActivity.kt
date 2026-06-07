@@ -52,6 +52,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.data.AppDatabase
+import androidx.room.Room
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.content.Context
@@ -158,7 +160,9 @@ fun getComposeColorFilter(filterName: String): androidx.compose.ui.graphics.Colo
 fun RobustVideoPlayer(
     videoUrl: String,
     modifier: Modifier = Modifier,
-    playImmediately: Boolean = false
+    playImmediately: Boolean = false,
+    autoPlay: Boolean = false,
+    loop: Boolean = true
 ) {
     val context = LocalContext.current
     var isReady by remember { mutableStateOf(false) }
@@ -166,8 +170,9 @@ fun RobustVideoPlayer(
     val exoPlayer = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUrl))
+            repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ONE else ExoPlayer.REPEAT_MODE_OFF
             prepare()
-            playWhenReady = playImmediately
+            playWhenReady = playImmediately || autoPlay
         }
     }
 
@@ -176,6 +181,8 @@ fun RobustVideoPlayer(
             exoPlayer.release()
         }
     }
+    
+    // Auto-play listener could potentially go here if autoPlay is dynamic (toggled)
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         AndroidView(
@@ -205,8 +212,11 @@ private val avatarPresets = listOf(
 )
 
 class MainActivity : ComponentActivity() {
+  lateinit var database: AppDatabase
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    database = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "safarisphere_db").build()
+    // ... rest of onCreate
     enableEdgeToEdge()
     setContent {
       MyApplicationTheme {
@@ -287,6 +297,7 @@ fun SafariSphereApp() {
   var userHeadline by remember { mutableStateOf(prefs.getString("user_headline", "Exploring uncharted digital frequencies...") ?: "Exploring uncharted digital frequencies...") }
   var userInterests by remember { mutableStateOf(prefs.getString("user_interests", "Wildlife Safari, Sound Design, Live Beats") ?: "Wildlife Safari, Sound Design, Live Beats") }
   var isFetchingProfile by remember { mutableStateOf(false) }
+  var autoPlayVideo by remember { mutableStateOf(prefs.getBoolean("auto_play_video", true)) }
 
   // State Simulation / Local Fallback Store matching MongoDB / Postgres listings
   val momentsList = remember {
