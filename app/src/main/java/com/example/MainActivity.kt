@@ -72,6 +72,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.viewinterop.AndroidView
+
 
 // ==============================================================================
 // 🌟 HELPER METADATA MODELS, PARSERS, AND CUSTOM COLOR FILTERS FOR LOCAL MEDIA POSTS
@@ -247,6 +253,8 @@ fun SafariSphereApp() {
   var userMood by remember { mutableStateOf(prefs.getString("user_mood", "Chill") ?: "Chill") }
   var userMoodEmoji by remember { mutableStateOf(prefs.getString("user_mood_emoji", "🦁") ?: "🦁") }
 
+
+
   // New Post Sheets parameters
   var showNewPostSheet by remember { mutableStateOf(false) }
   var newPostContent by remember { mutableStateOf("") }
@@ -416,6 +424,40 @@ fun SafariSphereApp() {
   val activeChatId = remember { mutableStateOf<String?>(null) }
   val activeChatMessages = remember { mutableStateListOf<BackendMessage>() }
   val explorersList = remember { mutableStateListOf<BackendExplorer>() }
+
+  // 🌌 Modern Profile Tracker & Persistent Followers System
+  var activeExplorerForProfile by remember { mutableStateOf<BackendExplorer?>(null) }
+  val followedUserNames = remember {
+    val set = prefs.getStringSet("followed_usernames_set", emptySet()) ?: emptySet()
+    mutableStateOf(set)
+  }
+  val toggleFollowUser: (String) -> Unit = { username ->
+    val current = followedUserNames.value.toMutableSet()
+    if (current.contains(username)) {
+      current.remove(username)
+    } else {
+      current.add(username)
+    }
+    followedUserNames.value = current
+    prefs.edit().putStringSet("followed_usernames_set", current).apply()
+  }
+  val onExplorerClicked: (String, String, String?, String?) -> Unit = { id, uname, dName, avUrl ->
+    val match = explorersList.find { it.username == uname || it.id == id }
+    if (match != null) {
+      activeExplorerForProfile = match
+    } else {
+      activeExplorerForProfile = BackendExplorer(
+        id = if (id.isBlank()) "exp_$uname" else id,
+        username = uname,
+        displayName = dName ?: uname,
+        avatarUrl = avUrl,
+        moodState = "Broadcasting frequencies into Digital Corridors",
+        moodEmoji = "🛰️",
+        xp = 380
+      )
+    }
+  }
+
   val activeChatsList = remember { mutableStateListOf<BackendChat>() }
   var isFetchingExplorers by remember { mutableStateOf(false) }
   var isFetchingChats by remember { mutableStateOf(false) }
@@ -897,7 +939,8 @@ fun SafariSphereApp() {
                 onCommentClicked = { post ->
                   activePostForComments = post
                   loadCommentsForPost(post.id)
-                }
+                },
+                onExplorerClicked = onExplorerClicked
               )
             }
           }
@@ -915,7 +958,8 @@ fun SafariSphereApp() {
                     roomsList[index] = room.copy(membersCount = room.membersCount + 1)
                     updateUserXp(25)
                   }
-                }
+                },
+                onExplorerClicked = onExplorerClicked
               )
             }
           }
@@ -968,7 +1012,8 @@ fun SafariSphereApp() {
                 onBackToChatList = {
                   activeChatId.value = null
                   activeChatMessages.clear()
-                }
+                },
+                onExplorerClicked = onExplorerClicked
               )
             }
           }
@@ -1038,6 +1083,9 @@ fun SafariSphereApp() {
                 onCommentClicked = { post ->
                   activePostForComments = post
                   loadCommentsForPost(post.id)
+                },
+                onExplorerClicked = { id, uname, dName, avatar ->
+                  onExplorerClicked(id, uname, dName, avatar)
                 }
               )
             }
@@ -1048,6 +1096,7 @@ fun SafariSphereApp() {
               onRefresh = { loadUserProfile() }
             ) {
               IdentityTab(
+                posts = postsList,
                 xp = userXp,
                 streak = userStreak,
                 mood = userMood,
@@ -1213,6 +1262,64 @@ fun SafariSphereApp() {
             }
           }
         }
+      }
+
+      // ----------------------------------------------------------------------------
+      // ULTRA-MODERN GLOBAL EXPLORER PROFILE VIEWER OVERLAY
+      // ----------------------------------------------------------------------------
+      if (activeExplorerForProfile != null) {
+        val exp = activeExplorerForProfile!!
+        UserProfileViewer(
+          userId = exp.id,
+          username = exp.username,
+          displayName = exp.displayName,
+          avatarUrl = exp.avatarUrl,
+          posts = postsList,
+          onClose = { activeExplorerForProfile = null },
+          onStartDirectMessage = { id, name ->
+            scope.launch {
+              try {
+                val result = NetworkService.api.initiateChat(InitiateChatRequest(recipientId = id))
+                val newChatId = result.chatId
+                if (newChatId != null) {
+                  val alreadyIn = activeChatsList.any { it.id == newChatId }
+                  if (!alreadyIn) {
+                    activeChatsList.add(
+                      BackendChat(
+                        id = newChatId,
+                        isGroup = false,
+                        peerId = id,
+                        peerName = name,
+                        peerAvatar = "",
+                        createdAt = ""
+                      )
+                    )
+                  }
+                  activeChatId.value = newChatId
+                  loadMessages(newChatId)
+                }
+                selectedTab = 2
+              } catch (e: Exception) {
+                val fallbackChatId = "chat_${id}_fallback"
+                val alreadyIn = activeChatsList.any { it.id == fallbackChatId }
+                if (!alreadyIn) {
+                  activeChatsList.add(
+                    BackendChat(
+                      id = fallbackChatId,
+                      isGroup = false,
+                      peerId = id,
+                      peerName = name,
+                      peerAvatar = "",
+                      createdAt = ""
+                    )
+                  )
+                }
+                activeChatId.value = fallbackChatId
+                selectedTab = 2
+              }
+            }
+          }
+        )
       }
 
       // ----------------------------------------------------------------------------
@@ -1955,6 +2062,10 @@ fun SafariSphereApp() {
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White.copy(alpha = 0.04f))
                 .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)), RoundedCornerShape(16.dp))
+                .clickable {
+                  onExplorerClicked("", post.username, post.author, post.avatarUrl)
+                  activePostForComments = null
+                }
                 .padding(14.dp),
               verticalAlignment = Alignment.Top
             ) {
@@ -2045,7 +2156,19 @@ fun SafariSphereApp() {
                       .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)), RoundedCornerShape(16.dp))
                       .padding(12.dp)
                   ) {
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                          onExplorerClicked(
+                            pComm.authorId ?: "",
+                            pComm.username ?: "anonymous_user",
+                            pComm.displayName ?: pComm.username,
+                            pComm.avatarUrl
+                          )
+                          activePostForComments = null
+                        }
+                    ) {
                       Box(
                         modifier = Modifier
                           .size(34.dp)
@@ -2060,7 +2183,7 @@ fun SafariSphereApp() {
                             modifier = Modifier.fillMaxSize().clip(CircleShape)
                           )
                         } else {
-                          Text(if (pComm.displayName?.contains("Luna") == true) "✨" else "👽", fontSize = 14.sp)
+                          Icon(Icons.Default.Person, contentDescription = "avatar", tint = Color.Gray, modifier = Modifier.size(16.dp))
                         }
                       }
                       Spacer(modifier = Modifier.width(10.dp))
@@ -2089,6 +2212,15 @@ fun SafariSphereApp() {
                             .padding(start = 20.dp, top = 6.dp)
                             .background(Color.Black.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
                             .border(BorderStroke(1.dp, NeonCyan.copy(alpha = 0.15f)), RoundedCornerShape(12.dp))
+                            .clickable {
+                              onExplorerClicked(
+                                subComm.authorId ?: "",
+                                subComm.username ?: "anonymous_user",
+                                subComm.displayName ?: subComm.username,
+                                subComm.avatarUrl
+                              )
+                              activePostForComments = null
+                            }
                             .padding(10.dp)
                         ) {
                           Box(
@@ -2208,16 +2340,37 @@ fun SafariSphereApp() {
 // 1. HOME SOCIAL FEED TAB
 // ==============================================================================
 @Composable
-fun FeedTab(
+fun OlderFeedTab(
   moments: List<MobileMoment>,
   posts: List<MobilePost>,
   isFetchingPosts: Boolean = false,
   onScrollDirectionChanged: (Boolean) -> Unit,
   onLikeClicked: (MobilePost) -> Unit,
   onMomentClicked: (MobileMoment) -> Unit,
-  onCommentClicked: (MobilePost) -> Unit
+  onCommentClicked: (MobilePost) -> Unit,
+  onExplorerClicked: (id: String, username: String, displayName: String?, avatarUrl: String?) -> Unit
 ) {
   val listState = rememberLazyListState()
+
+  val activeVideoPostId = remember(listState) {
+    derivedStateOf {
+      val visibleItems = listState.layoutInfo.visibleItemsInfo
+      if (visibleItems.isEmpty()) null
+      else {
+        val viewportCenter = (listState.layoutInfo.viewportStartOffset + listState.layoutInfo.viewportEndOffset) / 2
+        val closestItem = visibleItems.minByOrNull { item ->
+          val itemCenter = (item.offset + item.size / 2)
+          kotlin.math.abs(itemCenter - viewportCenter)
+        }
+        closestItem?.let { item ->
+          val postIndex = item.index - 4
+          if (postIndex >= 0 && postIndex < posts.size) {
+            posts[postIndex].id
+          } else null
+        }
+      }
+    }
+  }
 
   LaunchedEffect(listState) {
     var previousIndex = 0
@@ -2612,17 +2765,19 @@ fun FeedTab(
         Column(modifier = Modifier.padding(16.dp)) {
           // Post Header
           Row(
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable {
+                onExplorerClicked("exp_" + post.username, post.username, post.author, post.avatarUrl)
+              }
           ) {
-            Box(
-              modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.05f)),
-              contentAlignment = Alignment.Center
-            ) {
-              Text("🦁", fontSize = 18.sp)
-            }
+            ExplorerAvatar(
+              avatarUrl = post.avatarUrl,
+              name = post.author,
+              size = 42.dp,
+              borderColor = NeonCyan.copy(alpha = 0.25f)
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -2685,61 +2840,51 @@ fun FeedTab(
               .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
 
             if (post.mediaType == "video") {
-              // Video Player Mock card with dynamic ratio modifier applied
+              val isActivated = activeVideoPostId.value == post.id
               Box(
                 modifier = mediaModifier.background(Color.Black),
                 contentAlignment = Alignment.Center
               ) {
-                val videoThumbnail = if (!post.mediaUrl.contains("mixkit")) {
-                  post.mediaUrl
-                } else {
-                  "https://images.unsplash.com/photo-1547407139-3c921a66005c?auto=format&fit=crop&w=600&q=80"
-                }
-                AsyncImage(
-                  model = videoThumbnail,
-                  contentDescription = "Video Thumbnail",
-                  modifier = Modifier.fillMaxSize().alpha(0.6f),
-                  contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                  colorFilter = getComposeColorFilter(metadata.filter ?: "")
+                VideoPlayerView(
+                  mediaUrl = post.mediaUrl,
+                  isActivated = isActivated,
+                  modifier = Modifier.fillMaxSize()
                 )
 
-                var isPlaying by remember { mutableStateOf(false) }
+                Box(
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .border(
+                      width = if (isActivated) 2.dp else 0.dp,
+                      color = if (isActivated) NeonCyan.copy(alpha = 0.6f) else Color.Transparent,
+                      shape = RoundedCornerShape(16.dp)
+                    )
+                )
+
                 Surface(
                   modifier = Modifier
-                    .size(52.dp)
-                    .clip(CircleShape)
-                    .clickable { isPlaying = !isPlaying }
-                    .border(2.dp, NeonCyan, CircleShape),
-                  color = Color.Black.copy(alpha = 0.6f)
+                    .align(Alignment.TopStart)
+                    .padding(12.dp),
+                  color = Color.Black.copy(alpha = 0.62f),
+                  shape = RoundedCornerShape(8.dp),
+                  border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.3f))
                 ) {
-                  Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                      imageVector = if (isPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
-                      contentDescription = if (isPlaying) "Pause" else "Play",
-                      tint = NeonCyan,
-                      modifier = Modifier.size(24.dp)
-                    )
-                  }
-                }
-
-                if (isPlaying) {
-                  Box(
-                    modifier = Modifier
-                      .fillMaxSize()
-                      .background(Brush.radialGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.4f))))
-                      .border(2.dp, NeonCyan, RoundedCornerShape(16.dp))
+                  Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Text(
-                      "🛰️ FEED VIDEO LIVE CHIME",
-                      color = NeonCyan,
-                      fontSize = 8.sp,
-                      fontWeight = FontWeight.Bold,
-                      modifier = Modifier.align(Alignment.TopStart).padding(8.dp)
+                    Box(
+                      modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (isActivated) SoftNeonMint else Color.Gray)
                     )
-                    LinearProgressIndicator(
-                      color = NeonCyan,
-                      trackColor = Color.White.copy(alpha = 0.1f),
-                      modifier = Modifier.fillMaxWidth().height(4.dp).align(Alignment.BottomCenter)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                      text = if (isActivated) "ACTIVE PLAYBACK 🔇" else "SCROLL TO CHIME 💡",
+                      color = if (isActivated) NeonCyan else Color.White,
+                      fontSize = 8.sp,
+                      fontWeight = FontWeight.Bold
                     )
                   }
                 }
@@ -2827,13 +2972,14 @@ fun FeedTab(
 // 2. LIVE VYBE ROOMS TAB
 // ==============================================================================
 @Composable
-fun RoomsTab(
+fun OlderRoomsTab(
   rooms: List<MobileRoom>,
   isFetchingRooms: Boolean = false,
-  onJoinRoom: (MobileRoom) -> Unit
+  onJoinRoom: (MobileRoom) -> Unit,
+  onExplorerClicked: (id: String, username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _, _ -> }
 ) {
   var joinedRoomId by remember { mutableStateOf<String?>(null) }
-  var roomMessages = remember { mutableStateListOf<Pair<String, String>>() }
+  val roomMessages = remember { mutableStateListOf<Pair<String, String>>() }
   var roomInputMsg by remember { mutableStateOf("") }
 
   if (joinedRoomId == null) {
@@ -2956,10 +3102,14 @@ fun RoomsTab(
               modifier = Modifier.fillMaxWidth()
             ) {
               Text(
-                "Host: ${room.host}",
+                text = "Host: ${room.host}",
                 color = Color.Gray,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Normal
+                fontWeight = FontWeight.Normal,
+                modifier = Modifier
+                  .clip(RoundedCornerShape(4.dp))
+                  .clickable { onExplorerClicked("exp_${room.host}", room.host, room.host, null) }
+                  .padding(vertical = 2.dp, horizontal = 4.dp)
               )
 
               Spacer(modifier = Modifier.weight(1f))
@@ -2980,8 +3130,8 @@ fun RoomsTab(
             }
           }
         }
+        }
       }
-    }
     }
   } else {
     // ACTIVE JOINED VYBE ROOM CHAT INTERFACE
@@ -2997,7 +3147,13 @@ fun RoomsTab(
       ) {
         Column(modifier = Modifier.weight(1f)) {
           Text(activeRoom.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-          Text("Host: ${activeRoom.host} • ${activeRoom.membersCount} listening", color = Color.Gray, fontSize = 12.sp)
+          Text(
+            text = "Host: ${activeRoom.host} • ${activeRoom.membersCount} listening 📡",
+            color = Color.Gray,
+            fontSize = 12.sp,
+            modifier = Modifier
+              .clickable { onExplorerClicked("exp_${activeRoom.host}", activeRoom.host, activeRoom.host, null) }
+          )
         }
 
         IconButton(onClick = {
@@ -3047,7 +3203,20 @@ fun RoomsTab(
               .padding(12.dp)
           ) {
             Column {
-              Text(sender, color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+              Text(
+                text = sender,
+                color = NeonCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp,
+                modifier = Modifier
+                  .clip(RoundedCornerShape(4.dp))
+                  .clickable {
+                    if (sender != "You") {
+                      onExplorerClicked("exp_$sender", sender, sender, null)
+                    }
+                  }
+                  .padding(vertical = 2.dp, horizontal = 4.dp)
+              )
               Text(content, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
             }
           }
@@ -3096,7 +3265,7 @@ fun RoomsTab(
 // 3. SPHEREMATE AI COMPANION CHAT TAB
 // ==============================================================================
 @Composable
-fun AICompanionTab(
+fun OlderAICompanionTab(
   explorers: List<BackendExplorer>,
   chats: List<BackendChat>,
   activeChatId: String?,
@@ -3108,8 +3277,27 @@ fun AICompanionTab(
   onSelectExplorer: (BackendExplorer) -> Unit,
   onSelectChat: (BackendChat) -> Unit,
   onSendMessage: () -> Unit,
-  onBackToChatList: () -> Unit
+  onBackToChatList: () -> Unit,
+  onExplorerClicked: (id: String, username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _, _ -> }
 ) {
+  // Modern chat-app states
+  val messageReactions = remember { mutableStateMapOf<String, String>() }
+  val activeReactionMenuId = remember { mutableStateOf<String?>(null) }
+  val replyingToMessage = remember { mutableStateOf<BackendMessage?>(null) }
+  var showAttachMenu by remember { mutableStateOf(false) }
+  var chatSearchQuery by remember { mutableStateOf("") }
+  var isSearchActive by remember { mutableStateOf(false) }
+
+  // Simulated live typing feedback
+  val isCompanionTyping = remember { mutableStateOf(false) }
+  LaunchedEffect(activeChatId) {
+    if (activeChatId != null) {
+      isCompanionTyping.value = true
+      delay(1500)
+      isCompanionTyping.value = false
+    }
+  }
+
   Column(
     modifier = Modifier
       .fillMaxSize()
@@ -3344,6 +3532,9 @@ fun AICompanionTab(
       }
     } else {
       // --- Active Whisper Conversation Thread ---
+      val activeChat = chats.find { it.id == activeChatId }
+      val chatName = activeChat?.peerName ?: "Secure Whisper Channel"
+
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -3355,14 +3546,68 @@ fun AICompanionTab(
           modifier = Modifier
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.08f))
+            .size(48.dp)
         ) {
           Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
         }
+
         Spacer(modifier = Modifier.width(12.dp))
-        Column {
-          val chatName = chats.find { it.id == activeChatId }?.peerName ?: "Secure Whisper Channel"
-          Text(chatName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = chatName,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            modifier = Modifier.clickable {
+              if (activeChat != null) {
+                onExplorerClicked(activeChat.peerId ?: "", activeChat.peerName ?: "", activeChat.peerName, null)
+              }
+            }
+          )
           Text("Quantum encrypted tunnel • Live", color = SoftNeonMint, fontSize = 11.sp)
+        }
+
+        // Search in Chat Toggle Button
+        IconButton(
+          onClick = {
+            isSearchActive = !isSearchActive
+            if (!isSearchActive) chatSearchQuery = ""
+          },
+          modifier = Modifier.size(48.dp)
+        ) {
+          Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = "Search messages",
+            tint = if (isSearchActive) NeonCyan else Color.White
+          )
+        }
+      }
+
+      // Expandable Search Bar inside the Conversation
+      AnimatedVisibility(visible = isSearchActive) {
+        OutlinedTextField(
+          value = chatSearchQuery,
+          onValueChange = { chatSearchQuery = it },
+          placeholder = { Text("Filter conversation thread...", color = Color.Gray, fontSize = 12.sp) },
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = NeonCyan,
+            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White
+          ),
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+          shape = RoundedCornerShape(12.dp)
+        )
+      }
+
+      val filteredMessages = remember(chatMessages, chatSearchQuery) {
+        if (chatSearchQuery.isBlank()) {
+          chatMessages
+        } else {
+          chatMessages.filter { it.content?.contains(chatSearchQuery, ignoreCase = true) == true }
         }
       }
 
@@ -3373,14 +3618,21 @@ fun AICompanionTab(
           .padding(vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        items(chatMessages) { msg ->
+        items(filteredMessages) { msg ->
           val alignRight = msg.senderId == "me" || msg.senderId == "You"
-          Row(
+          val messageId = msg.id ?: "msg_${System.currentTimeMillis()}"
+
+          Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = if (alignRight) Arrangement.End else Arrangement.Start
+            horizontalAlignment = if (alignRight) Alignment.End else Alignment.Start
           ) {
             Surface(
-              modifier = Modifier.fillMaxWidth(0.82f),
+              modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .clickable {
+                  // Toggle active reaction menu
+                  activeReactionMenuId.value = if (activeReactionMenuId.value == messageId) null else messageId
+                },
               color = if (alignRight) BentoIndigoDeep else GlassyCard,
               shape = RoundedCornerShape(
                 topStart = 20.dp,
@@ -3388,48 +3640,373 @@ fun AICompanionTab(
                 bottomStart = if (alignRight) 20.dp else 4.dp,
                 bottomEnd = if (alignRight) 4.dp else 20.dp
               ),
-              border = if (!alignRight) BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)) else null
+              border = if (!alignRight) BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)) else null
             ) {
               Column(modifier = Modifier.padding(12.dp)) {
+                // Sender Label mapping directly to clinical clickable profile view
                 if (!alignRight) {
                   Text(
                     text = msg.senderName ?: "Pioneer",
                     color = NeonCyan,
                     fontWeight = FontWeight.Bold,
                     fontSize = 10.sp,
-                    modifier = Modifier.padding(bottom = 2.dp)
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(4.dp))
+                      .clickable {
+                        onExplorerClicked(msg.senderId ?: "", msg.senderName ?: "", msg.senderName, msg.senderAvatar)
+                      }
+                      .padding(bottom = 4.dp)
                   )
                 }
-                Text(
-                  text = msg.content ?: "",
-                  color = Color.White,
-                  fontSize = 13.sp,
-                  lineHeight = 18.sp
-                )
+
+                val textContent = msg.content ?: ""
+
+                // 🌌 PARSING RICH MEDIA ATTACHMENTS FOR MODERN CHAT COGNITION 🌌
+                if (textContent.contains("[Beacon Location:") || textContent.contains("live coordinates")) {
+                  // Core Holographic Location Badge
+                  Column(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .clip(RoundedCornerShape(12.dp))
+                      .background(Color.Black.copy(alpha = 0.4f))
+                      .border(1.dp, NeonCyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                      .padding(10.dp)
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      Text("🛰️", fontSize = 20.sp)
+                      Spacer(modifier = Modifier.width(8.dp))
+                      Text(
+                        "LIVE TELEMETRY COORDS",
+                        color = NeonCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                      )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(textContent.replace("[Beacon Location:", "").replace("]", ""), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    // Simulated sweep
+                    LinearProgressIndicator(
+                      color = NeonCyan,
+                      trackColor = Color.White.copy(alpha = 0.05f),
+                      modifier = Modifier.fillMaxWidth().height(2.dp)
+                    )
+                  }
+                } else if (textContent.contains("[Astro Capture:") || textContent.contains("Astro Flare")) {
+                  // Beautiful deep gradient illustration to simulate astrophotography capture
+                  Column(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .clip(RoundedCornerShape(12.dp))
+                      .background(
+                        Brush.verticalGradient(
+                          colors = listOf(BentoIndigoDeep, DeepObsidian)
+                        )
+                      )
+                      .border(1.dp, SoftNeonMint.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                      .padding(12.dp)
+                  ) {
+                    Text("📸 ASTRO PHOTOGRAPHY", color = SoftNeonMint, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                      modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                          Brush.sweepGradient(
+                            colors = listOf(Color(0xFF8A2BE2), Color(0xFFDA70D6), Color(0xFF00FFFF), Color(0xFF8A2BE2))
+                          )
+                        )
+                    ) {
+                      Text(
+                        "Solar Aurora Glow",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.Center)
+                      )
+                    }
+                  }
+                } else if (textContent.contains("[Acoustic Tone:") || textContent.contains("Audio Frequency")) {
+                  // Equalizer chimer with toggle playback trigger
+                  var isPlaying by remember { mutableStateOf(false) }
+                  Column(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .clip(RoundedCornerShape(12.dp))
+                      .background(Color.White.copy(alpha = 0.04f))
+                      .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                      .padding(10.dp)
+                  ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                      IconButton(
+                        onClick = { isPlaying = !isPlaying },
+                        modifier = Modifier
+                          .size(32.dp)
+                          .clip(CircleShape)
+                          .background(NeonCyan.copy(alpha = 0.15f))
+                      ) {
+                        Icon(
+                          imageVector = if (isPlaying) Icons.Default.Close else Icons.Default.PlayArrow,
+                          contentDescription = "Play/Stop frequency",
+                          tint = NeonCyan,
+                          modifier = Modifier.size(16.dp)
+                        )
+                      }
+                      Spacer(modifier = Modifier.width(10.dp))
+                      Column {
+                        Text("ACOUSTIC CHIME WAVE", color = Color.LightGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                          if (isPlaying) "Streaming 432Hz Core... 🎵" else "Core Harmonic Resonance (432Hz)",
+                          color = Color.White,
+                          fontSize = 11.sp
+                        )
+                      }
+                    }
+                    if (isPlaying) {
+                      Spacer(modifier = Modifier.height(8.dp))
+                      Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                      ) {
+                        val bars = listOf(12.dp, 24.dp, 16.dp, 32.dp, 20.dp, 14.dp, 28.dp)
+                        bars.forEach { h ->
+                          Box(
+                            modifier = Modifier
+                              .width(3.dp)
+                              .height(h)
+                              .background(NeonCyan)
+                          )
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  // Plain string rendering
+                  Text(
+                    text = textContent,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                  )
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  // Direct reply icon trigger
+                  Icon(
+                    imageVector = Icons.Default.MailOutline,
+                    contentDescription = "Reply",
+                    tint = Color.White.copy(alpha = 0.3f),
+                    modifier = Modifier
+                      .size(24.dp)
+                      .clickable { replyingToMessage.value = msg }
+                  )
+
+                  Text(
+                    text = if (msg.createdAt.isNullOrEmpty() || msg.createdAt.contains("Just now")) "Just now" else "17:40",
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 9.sp
+                  )
+                }
+              }
+            }
+
+            // Pin reaction badge if present
+            if (messageReactions.containsKey(messageId)) {
+              Surface(
+                color = Color.Black.copy(alpha = 0.72f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.3f)),
+                modifier = Modifier.padding(horizontal = 12.dp).padding(top = 2.dp)
+              ) {
                 Text(
-                  text = if (msg.createdAt.isNullOrEmpty() || msg.createdAt.contains("Just now")) "Just now" else "17:40",
-                  color = Color.White.copy(alpha = 0.4f),
-                  fontSize = 9.sp,
-                  textAlign = TextAlign.End,
-                  modifier = Modifier.fillMaxWidth()
+                  text = messageReactions[messageId]!!,
+                  fontSize = 11.sp,
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
+              }
+            }
+
+            // Action reaction bar below selected bubble card
+            AnimatedVisibility(visible = activeReactionMenuId.value == messageId) {
+              Row(
+                modifier = Modifier
+                  .padding(vertical = 4.dp, horizontal = 8.dp)
+                  .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                  .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                  .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+              ) {
+                val emojis = listOf("❤️", "👍", "🔥", "😂", "🌌")
+                emojis.forEach { emoji ->
+                  Text(
+                    text = emoji,
+                    fontSize = 16.sp,
+                    modifier = Modifier
+                      .clickable {
+                        messageReactions[messageId] = emoji
+                        activeReactionMenuId.value = null
+                      }
+                      .padding(horizontal = 4.dp, vertical = 2.dp)
+                  )
+                }
               }
             }
           }
         }
       }
 
+      // Typing feedback simulation panel
+      if (isCompanionTyping.value) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp, horizontal = 6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Box(
+            modifier = Modifier
+              .size(6.dp)
+              .clip(CircleShape)
+              .background(SoftNeonMint)
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "$chatName is transceiving frequency...",
+            color = SoftNeonMint,
+            fontSize = 11.sp,
+            fontStyle = FontStyle.Italic
+          )
+        }
+      }
+
+      // Quoted Reply Context Banner
+      if (replyingToMessage.value != null) {
+        Surface(
+          modifier = Modifier.fillMaxWidth(),
+          color = Color.White.copy(alpha = 0.05f),
+          shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+        ) {
+          Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+          ) {
+            Column {
+              Text(
+                "REPLY QUOTE DIRECT",
+                color = NeonCyan,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+              )
+              Text(
+                text = replyingToMessage.value!!.content?.take(48) ?: "",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+            IconButton(
+              onClick = { replyingToMessage.value = null },
+              modifier = Modifier.size(24.dp)
+            ) {
+              Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = Color.Gray)
+            }
+          }
+        }
+      }
+
+      // Rich Payload Attachments Sheet selector drawer
+      AnimatedVisibility(visible = showAttachMenu) {
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp),
+          color = GlassyCard,
+          shape = RoundedCornerShape(16.dp),
+          border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.18f))
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              modifier = Modifier.clickable {
+                onUserInputChange("[Beacon Location: Savannah Base • 12.87°S, 33.43°E]")
+                showAttachMenu = false
+              }
+            ) {
+              Text("📍", fontSize = 24.sp)
+              Text("GPS Beacon", color = Color.LightGray, fontSize = 10.sp)
+            }
+
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              modifier = Modifier.clickable {
+                onUserInputChange("[Astro Capture: Nebula Core Flare]")
+                showAttachMenu = false
+              }
+            ) {
+              Text("🪐", fontSize = 24.sp)
+              Text("Astro Star", color = Color.LightGray, fontSize = 10.sp)
+            }
+
+            Column(
+              horizontalAlignment = Alignment.CenterHorizontally,
+              modifier = Modifier.clickable {
+                onUserInputChange("[Acoustic Tone: Core Heartbeat Frequencies (432Hz)]")
+                showAttachMenu = false
+              }
+            ) {
+              Text("📻", fontSize = 24.sp)
+              Text("Acoustic 432", color = Color.LightGray, fontSize = 10.sp)
+            }
+          }
+        }
+      }
+
+      // Conversation message bar
       Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(top = 10.dp),
+          .padding(top = 4.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
+        // '+' toggle attachments
+        IconButton(
+          onClick = { showAttachMenu = !showAttachMenu },
+          modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .size(48.dp)
+        ) {
+          Icon(
+            imageVector = if (showAttachMenu) Icons.Default.Close else Icons.Default.Add,
+            contentDescription = "Attach file",
+            tint = if (showAttachMenu) Color.Red else NeonCyan
+          )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
         OutlinedTextField(
           value = userInput,
           onValueChange = onUserInputChange,
-          placeholder = { Text("Write quantum whisper secure message...", color = Color.Gray, fontSize = 13.sp) },
+          placeholder = { Text("Write quantum whisper secure message...", color = Color.Gray, fontSize = 12.sp) },
           colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = NeonCyan,
             unfocusedBorderColor = Color.DarkGray,
@@ -3444,7 +4021,17 @@ fun AICompanionTab(
         Spacer(modifier = Modifier.width(8.dp))
 
         IconButton(
-          onClick = onSendMessage,
+          onClick = {
+            if (userInput.isNotBlank()) {
+              var finalInput = userInput
+              if (replyingToMessage.value != null) {
+                finalInput = "💬 (Replying directly to: \"${replyingToMessage.value!!.content?.take(32) ?: ""}\")\n$finalInput"
+              }
+              onUserInputChange(finalInput)
+              onSendMessage()
+              replyingToMessage.value = null
+            }
+          },
           modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(NeonCyan)
@@ -3462,16 +4049,16 @@ fun AICompanionTab(
 // 4. DISCOVER TAB (SEARCH & COMMUNITIES)
 // ==============================================================================
 @Composable
-fun DiscoverTab(
+fun OlderDiscoverTab(
   communities: List<MobileCommunity>,
   explorers: List<BackendExplorer>,
   posts: List<MobilePost>,
   onJoinCommunity: (MobileCommunity) -> Unit,
   onInitiateDM: (BackendExplorer) -> Unit,
-  onCommentClicked: (MobilePost) -> Unit
+  onCommentClicked: (MobilePost) -> Unit,
+  onExplorerClicked: (id: String, username: String, displayName: String?, avatarUrl: String?) -> Unit
 ) {
   var searchQuery by remember { mutableStateOf("") }
-  var selectedExplorerForProfile by remember { mutableStateOf<BackendExplorer?>(null) }
 
   var isSearchingMockLoading by remember { mutableStateOf(false) }
   LaunchedEffect(searchQuery) {
@@ -3607,7 +4194,7 @@ fun DiscoverTab(
               Surface(
                 modifier = Modifier
                   .width(135.dp)
-                  .clickable { selectedExplorerForProfile = exp },
+                  .clickable { onExplorerClicked(exp.id, exp.username, exp.displayName, exp.avatarUrl) },
                 color = GlassyCard,
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
@@ -3874,129 +4461,13 @@ fun DiscoverTab(
       }
     }
   }
-
-  // Selected Explorer Profile dialog overlay
-  if (selectedExplorerForProfile != null) {
-    val exp = selectedExplorerForProfile!!
-    Box(
-      modifier = Modifier
-        .fillMaxSize()
-        .background(Color.Black.copy(alpha = 0.73f))
-        .clickable { selectedExplorerForProfile = null },
-      contentAlignment = Alignment.Center
-    ) {
-      Surface(
-        modifier = Modifier
-          .fillMaxWidth(0.85f)
-          .wrapContentHeight()
-          .clickable(enabled = false) {},
-        color = GlassyCard,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-      ) {
-        Column(
-          modifier = Modifier.padding(24.dp),
-          horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-          Box(
-            modifier = Modifier
-              .size(80.dp)
-              .clip(CircleShape)
-              .background(Brush.linearGradient(listOf(NeonCyan, SoftNeonMint)))
-              .padding(3.dp),
-            contentAlignment = Alignment.Center
-          ) {
-            Box(
-              modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(DeepObsidian),
-              contentAlignment = Alignment.Center
-            ) {
-              Text(exp.moodEmoji ?: "📡", fontSize = 36.sp)
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Text(
-            exp.displayName ?: exp.username,
-            color = Color.White,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 18.sp
-          )
-
-          Text(
-            "@${exp.username}",
-            color = NeonCyan,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
-          )
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          Text(
-            "Status: ${exp.moodState ?: "Exploring Savannah shores"}",
-            color = Color.LightGray,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center
-          )
-
-          Text(
-            "Cosmic Level: ${(exp.xp ?: 100) / 100} • XP Balance: ${exp.xp ?: 100}",
-            color = Color.Gray,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 4.dp)
-          )
-
-          Spacer(modifier = Modifier.height(20.dp))
-
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-          ) {
-            Button(
-              onClick = { selectedExplorerForProfile = null },
-              colors = ButtonDefaults.buttonColors(
-                containerColor = Color.White.copy(alpha = 0.05f),
-                contentColor = Color.Gray
-              ),
-              modifier = Modifier.weight(1f),
-              shape = RoundedCornerShape(12.dp)
-            ) {
-              Text("Close", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Button(
-              onClick = {
-                onInitiateDM(exp)
-                selectedExplorerForProfile = null
-              },
-              colors = ButtonDefaults.buttonColors(
-                containerColor = NeonCyan,
-                contentColor = Color.Black
-              ),
-              modifier = Modifier.weight(1.3f),
-              shape = RoundedCornerShape(12.dp)
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Send, contentDescription = "Send PM", modifier = Modifier.size(12.dp), tint = Color.Black)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Whisper DM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-              }
-            }
-          }
-        }
-      }
-    }
-  }
 }
 
 // ==============================================================================
 // 5. IDENTITY MY PROFILE TAB
 // ==============================================================================
 @Composable
-fun IdentityTab(
+fun OlderIdentityTab(
   xp: Int,
   streak: Int,
   mood: String,
@@ -4010,6 +4481,7 @@ fun IdentityTab(
   email: String,
   headline: String,
   interests: String,
+  posts: List<MobilePost>,
   onMoodSelected: (String, String) -> Unit,
   onProfileUpdated: (nickname: String, bio: String, location: String, avatarUrl: String, handle: String, email: String, headline: String, interests: String) -> Unit,
   onLogOut: () -> Unit,
@@ -4018,6 +4490,7 @@ fun IdentityTab(
   isFetchingProfile: Boolean = false
 ) {
   val context = LocalContext.current
+  val scope = rememberCoroutineScope()
   val prefs = remember { context.getSharedPreferences("safari_sphere_prefs", android.content.Context.MODE_PRIVATE) }
   var hasDraft by remember { mutableStateOf(prefs.getBoolean("profile_draft_exists", false)) }
 
@@ -4072,6 +4545,18 @@ fun IdentityTab(
     }
   }
 
+  var selectedProfileTab by remember { mutableStateOf(0) } // 0 = Broadcasts, 1 = Stats & Achievements, 2 = Space Settings
+  var selectedThemeMode by remember { mutableStateOf(prefs.getString("selected_orbit_theme", "Midnight Slate") ?: "Midnight Slate") }
+  var beaconNotifsEnabled by remember { mutableStateOf(prefs.getBoolean("beacon_notifs_enabled", true)) }
+  var frequencyChimesEnabled by remember { mutableStateOf(prefs.getBoolean("frequency_chimes_enabled", true)) }
+  var cacheValue by remember { mutableStateOf("24.8 MB") }
+  var isOptimizingCache by remember { mutableStateOf(false) }
+  var optimizationStatusText by remember { mutableStateOf("") }
+  val myPosts = remember(posts, handle) { posts.filter { it.username == handle } }
+
+  var stealthModeEnabled by remember { mutableStateOf(prefs.getBoolean("stealth_mode_enabled", false)) }
+  var frequencyBand by remember { mutableStateOf(prefs.getString("frequency_band", "5.8 GHz Hyperwave") ?: "5.8 GHz Hyperwave") }
+
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
     contentPadding = PaddingValues(16.dp),
@@ -4102,380 +4587,755 @@ fun IdentityTab(
           }
         }
       }
-      items(2) {
+    } else {
+      // --- STREAMLINED BENTO HERO PROFILE CARD ---
+      item {
         Surface(
-          modifier = Modifier.fillMaxWidth().height(80.dp),
-          color = GlassyCard.copy(alpha = 0.5f),
-          shape = RoundedCornerShape(16.dp),
-          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+          modifier = Modifier
+            .fillMaxWidth()
+            .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp)),
+          color = GlassyCard,
+          shape = RoundedCornerShape(24.dp),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
         ) {
-          Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
-            ShimmerPlaceholder(modifier = Modifier.width(110.dp).height(12.dp))
-            Spacer(modifier = Modifier.height(8.dp))
-            ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.5f).height(10.dp))
+          Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            // Glowing dynamic avatar ring
+            Box(
+              modifier = Modifier
+                .size(88.dp)
+                .clip(CircleShape)
+                .background(
+                  Brush.linearGradient(
+                    colors = listOf(NeonCyan, BentoIndigo, SoftNeonMint)
+                  )
+                )
+                .padding(3.dp),
+              contentAlignment = Alignment.Center
+            ) {
+              Box(
+                modifier = Modifier
+                  .fillMaxSize()
+                  .clip(CircleShape)
+                  .background(DeepObsidian),
+                contentAlignment = Alignment.Center
+              ) {
+                if (!avatarUrl.isNullOrEmpty()) {
+                  AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = "User Avatar",
+                    modifier = Modifier
+                      .fillMaxSize()
+                      .clip(CircleShape)
+                  )
+                } else {
+                  Text(moodEmoji, fontSize = 40.sp)
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+              text = nickname,
+              color = Color.White,
+              fontWeight = FontWeight.Bold,
+              fontSize = 18.sp
+            )
+            Text(
+              text = "@$handle",
+              color = Color.Gray,
+              fontSize = 12.sp
+            )
+
+            if (headline.isNotEmpty()) {
+              Surface(
+                color = NeonCyan.copy(alpha = 0.06f),
+                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.15f)),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp).testTag("profile_headline_badge")
+              ) {
+                Row(
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("📡", fontSize = 10.sp)
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(
+                    text = headline,
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 10.sp,
+                    fontStyle = FontStyle.Italic
+                  )
+                }
+              }
+            }
+
+            Text(
+              text = bio.ifBlank { "Setting up communication matrix..." },
+              color = Color.LightGray,
+              fontSize = 12.sp,
+              textAlign = TextAlign.Center,
+              modifier = Modifier.padding(top = 6.dp, start = 8.dp, end = 8.dp)
+            )
+
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              modifier = Modifier.padding(top = 8.dp)
+            ) {
+              Icon(imageVector = Icons.Default.Place, contentDescription = "Place", tint = Color.Gray, modifier = Modifier.size(12.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(location.ifBlank { "Deep Space Outer Edge" }, color = Color.Gray, fontSize = 11.sp)
+              Spacer(modifier = Modifier.width(8.dp))
+              Icon(imageVector = Icons.Default.DateRange, contentDescription = "Date", tint = Color.Gray, modifier = Modifier.size(12.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text(formatJoinedDateString(joinDate), color = Color.Gray, fontSize = 11.sp)
+            }
+
+            // Dynamic Tag Scroll view for interests
+            val tags = remember(interests) {
+              if (interests.trim().isEmpty()) emptyList<String>()
+              else interests.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            }
+            if (tags.isNotEmpty()) {
+              Spacer(modifier = Modifier.height(10.dp))
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.Center
+              ) {
+                tags.forEach { tg ->
+                  Surface(
+                    color = BentoIndigo.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, SoftNeonMint.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.padding(horizontal = 3.dp)
+                  ) {
+                    Text(
+                      text = tg,
+                      color = SoftNeonMint,
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                  }
+                }
+              }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Inline interactive profile configs button row
+            Row(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              // Mood Status Selector
+              Surface(
+                color = NeonCyan.copy(alpha = 0.1f),
+                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.25f)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.clickable { showSelectMoodDialog = true }
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                  Text(moodEmoji, fontSize = 12.sp)
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text("Status: $mood", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+              }
+
+              // Edit details profile trigger button
+              Button(
+                onClick = {
+                  val draftExists = prefs.getBoolean("profile_draft_exists", false)
+                  if (draftExists) {
+                    editNicknameInput = prefs.getString("draft_nickname", nickname) ?: nickname
+                    editBioInput = prefs.getString("draft_bio", bio) ?: bio
+                    editLocationInput = prefs.getString("draft_location", location) ?: location
+                    editAvatarInput = prefs.getString("draft_avatar", avatarUrl ?: "") ?: ""
+                    editHandleInput = prefs.getString("draft_handle", handle) ?: handle
+                    editEmailInput = prefs.getString("draft_email", email) ?: email
+                    editHeadlineInput = prefs.getString("draft_headline", headline) ?: headline
+                    editInterestsInput = prefs.getString("draft_interests", interests) ?: interests
+                    hasDraft = true
+                  } else {
+                    editNicknameInput = nickname
+                    editBioInput = bio
+                    editLocationInput = location
+                    editAvatarInput = avatarUrl ?: ""
+                    editHandleInput = handle
+                    editEmailInput = email
+                    editHeadlineInput = headline
+                    editInterestsInput = interests
+                    hasDraft = false
+                  }
+                  showEditProfileDialog = true
+                },
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = Color.White.copy(alpha = 0.06f),
+                  contentColor = NeonCyan
+                ),
+                border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.2f)),
+                modifier = Modifier.height(30.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                shape = RoundedCornerShape(12.dp)
+              ) {
+                Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Profile", modifier = Modifier.size(12.dp), tint = NeonCyan)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Edit Details", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              }
+            }
           }
         }
       }
-    } else {
-      // Hero profile visual banner card in Bento Style
+
+      // HIGH-END COMPACT SEGMENTED NAVIGATION CONTROLS
       item {
         Surface(
-        modifier = Modifier
-          .fillMaxWidth()
-          .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp)),
-        color = GlassyCard,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-      ) {
-        Column(
-          modifier = Modifier.padding(24.dp),
-          horizontalAlignment = Alignment.CenterHorizontally
+          modifier = Modifier.fillMaxWidth(),
+          color = Color.White.copy(alpha = 0.02f),
+          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
+          shape = RoundedCornerShape(14.dp)
         ) {
-          // Glow Outer Circle Avatar border with Bento color gradients
-          Box(
-            modifier = Modifier
-              .size(92.dp)
-              .clip(CircleShape)
-              .background(
-                Brush.linearGradient(
-                  colors = listOf(NeonCyan, BentoIndigo, SoftNeonMint)
-                )
-              )
-              .padding(4.dp),
-            contentAlignment = Alignment.Center
+          Row(
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
           ) {
-            Box(
-              modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(DeepObsidian),
-              contentAlignment = Alignment.Center
-            ) {
-              if (!avatarUrl.isNullOrEmpty()) {
-                AsyncImage(
-                  model = avatarUrl,
-                  contentDescription = "User Avatar",
-                  modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
-                )
-              } else {
-                Text(moodEmoji, fontSize = 42.sp)
-              }
-            }
-          }
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Text(
-            nickname,
-            color = Color.White,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 18.sp
-          )
-          Text(
-            "@$handle",
-            color = Color.Gray,
-            fontSize = 13.sp
-          )
-
-          if (headline.isNotEmpty()) {
-            Surface(
-              color = NeonCyan.copy(alpha = 0.05f),
-              border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.12f)),
-              shape = RoundedCornerShape(12.dp),
-              modifier = Modifier.padding(top = 8.dp, bottom = 4.dp).testTag("profile_headline_badge")
-            ) {
-              Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+            val tabsData = listOf(
+              Triple(0, "📡 Transmissions", "broadcasts_tab"),
+              Triple(1, "📈 Progression", "progression_tab"),
+              Triple(2, "⚙️ Control Settings", "settings_tab")
+            )
+            tabsData.forEach { (tabId, tabName, testTag) ->
+              val active = selectedProfileTab == tabId
+              Surface(
+                modifier = Modifier
+                  .weight(1f)
+                  .clickable { selectedProfileTab = tabId }
+                  .testTag(testTag),
+                color = if (active) NeonCyan.copy(alpha = 0.1f) else Color.Transparent,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (active) NeonCyan.copy(alpha = 0.25f) else Color.Transparent)
               ) {
-                Text("💬", fontSize = 11.sp)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                  text = headline,
-                  color = Color.White.copy(alpha = 0.92f),
-                  fontSize = 11.sp,
-                  fontStyle = FontStyle.Italic,
-                  fontWeight = FontWeight.Medium,
-                  textAlign = TextAlign.Center
-                )
-              }
-            }
-          }
-
-          Text(
-            bio,
-            color = Color.LightGray,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp, start = 16.dp, end = 16.dp)
-          )
-
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 6.dp)
-          ) {
-            Icon(
-              imageVector = Icons.Default.Place,
-              contentDescription = "Place",
-              tint = Color.Gray,
-              modifier = Modifier.size(12.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-              location,
-              color = Color.Gray,
-              fontSize = 11.sp
-            )
-          }
-
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(top = 4.dp)
-          ) {
-            Icon(
-              imageVector = Icons.Default.DateRange,
-              contentDescription = "Joined Date",
-              tint = Color.Gray,
-              modifier = Modifier.size(12.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-              text = formatJoinedDateString(joinDate),
-              color = Color.Gray,
-              fontSize = 11.sp
-            )
-          }
-
-          // Dynamic Interests Tags Display section
-          val parsedInterestsList = remember(interests) {
-            if (interests.trim().isEmpty()) emptyList<String>()
-            else interests.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-          }
-          
-          if (parsedInterestsList.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-              modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .testTag("profile_interests_scroll_row"),
-              horizontalArrangement = Arrangement.Center,
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              parsedInterestsList.forEach { tagVal ->
-                Surface(
-                  color = BentoIndigo.copy(alpha = 0.15f),
-                  border = BorderStroke(1.dp, SoftNeonMint.copy(alpha = 0.25f)),
-                  shape = RoundedCornerShape(8.dp),
-                  modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                Box(
+                  modifier = Modifier.padding(vertical = 10.dp),
+                  contentAlignment = Alignment.Center
                 ) {
                   Text(
-                    text = tagVal,
-                    color = SoftNeonMint,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    text = tabName,
+                    color = if (active) NeonCyan else Color.Gray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
                   )
                 }
               }
             }
           }
+        }
+      }
 
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            // Edit status button
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(NeonCyan.copy(alpha = 0.12f))
-                .clickable { showSelectMoodDialog = true }
-                .padding(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(moodEmoji, fontSize = 12.sp)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Status: $mood", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-              }
-            }
-
-            // Adapt Identity button
-            Button(
-              onClick = {
-                val draftExists = prefs.getBoolean("profile_draft_exists", false)
-                if (draftExists) {
-                  editNicknameInput = prefs.getString("draft_nickname", nickname) ?: nickname
-                  editBioInput = prefs.getString("draft_bio", bio) ?: bio
-                  editLocationInput = prefs.getString("draft_location", location) ?: location
-                  editAvatarInput = prefs.getString("draft_avatar", avatarUrl ?: "") ?: ""
-                  editHandleInput = prefs.getString("draft_handle", handle) ?: handle
-                  editEmailInput = prefs.getString("draft_email", email) ?: email
-                  editHeadlineInput = prefs.getString("draft_headline", headline) ?: headline
-                  editInterestsInput = prefs.getString("draft_interests", interests) ?: interests
-                  hasDraft = true
-                } else {
-                  editNicknameInput = nickname
-                  editBioInput = bio
-                  editLocationInput = location
-                  editAvatarInput = avatarUrl ?: ""
-                  editHandleInput = handle
-                  editEmailInput = email
-                  editHeadlineInput = headline
-                  editInterestsInput = interests
-                  hasDraft = false
+      // SEGMENTED TAB DETAILS DISPLAY
+      when (selectedProfileTab) {
+        0 -> {
+          // TAB 0: PERSONAL BROADCASTS
+          if (myPosts.isEmpty()) {
+            item {
+              Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White.copy(alpha = 0.01f),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.04f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(24.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                  Text("📡", fontSize = 28.sp)
+                  Spacer(modifier = Modifier.height(8.dp))
+                  Text("No active transmissions active", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                  Text("Beam coordinates, astro snapshots or chimes from the feed tab!", color = Color.Gray, fontSize = 10.sp, textAlign = TextAlign.Center)
                 }
-                showEditProfileDialog = true
-              },
-              colors = ButtonDefaults.buttonColors(
-                containerColor = Color.White.copy(alpha = 0.08f),
-                contentColor = NeonCyan
-              ),
-              border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.2f)),
-              contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-              modifier = Modifier.height(30.dp),
-              shape = RoundedCornerShape(12.dp)
-            ) {
-              Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Profile", modifier = Modifier.size(10.dp), tint = NeonCyan)
-              Spacer(modifier = Modifier.width(6.dp))
-              Text("Adapt Identity", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+          } else {
+            items(myPosts) { post ->
+              val (cleanContent, metadata) = remember(post.content) { parsePostMetadata(post.content) }
+              Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = GlassyCard.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+              ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                      modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.05f)),
+                      contentAlignment = Alignment.Center
+                    ) {
+                      if (!avatarUrl.isNullOrEmpty()) {
+                        AsyncImage(model = avatarUrl, contentDescription = "avatar", modifier = Modifier.fillMaxSize().clip(CircleShape))
+                      } else {
+                        Text(moodEmoji, fontSize = 14.sp)
+                      }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                      Text(nickname, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                      Text(post.created, color = Color.Gray, fontSize = 9.sp)
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    Text(
+                      text = post.vibeCategory,
+                      color = NeonCyan,
+                      fontSize = 9.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier
+                        .background(NeonCyan.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                  }
+                  Spacer(modifier = Modifier.height(8.dp))
+                  Text(cleanContent, color = Color.White, fontSize = 13.sp, lineHeight = 18.sp)
+                }
+              }
             }
           }
         }
-      }
-    }
+        1 -> {
+          // TAB 1: PROGRESSION & STATS
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(20.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Icon(imageVector = Icons.Default.Star, contentDescription = "XP", tint = NeonCyan, modifier = Modifier.size(18.dp))
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text("Orbital Vibe Level Indicator", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                  Spacer(modifier = Modifier.weight(1f))
+                  Text("Pioneer Rank #12", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
 
-    // Gamification progress levels tracker (XP indicator) in Bento block style
-    item {
-      Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = GlassyCard,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-      ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-          ) {
-            Icon(imageVector = Icons.Default.Star, contentDescription = "XP Icon", tint = NeonCyan, modifier = Modifier.size(22.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Vibe Score & Progression", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(12.dp))
 
-            Spacer(modifier = Modifier.weight(1f))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                  Text("Aggregated XP Gained:", color = Color.Gray, fontSize = 12.sp)
+                  Text("$xp XP", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
 
-            Text("Rank #12", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                LinearProgressIndicator(
+                  progress = (xp % 100) / 100f,
+                  color = NeonCyan,
+                  trackColor = Color.White.copy(alpha = 0.05f),
+                  modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp))
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                  text = "${100 - (xp % 100)} XP needed to escalate frequency levels",
+                  color = Color.Gray,
+                  fontSize = 10.sp,
+                  textAlign = TextAlign.End,
+                  modifier = Modifier.fillMaxWidth()
+                )
+              }
+            }
           }
 
-          Spacer(modifier = Modifier.height(14.dp))
+          item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+              Text("Verified Milestones", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
 
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
-            Text("Total XP Gained:", color = Color.Gray, fontSize = 13.sp)
-            Text("$xp XP", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-          }
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          // Level progress indicator
-          LinearProgressIndicator(
-            progress = (xp % 100) / 100f,
-            color = NeonCyan,
-            trackColor = Color.White.copy(alpha = 0.05f),
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(8.dp)
-              .clip(RoundedCornerShape(4.dp))
-          )
-
-          Spacer(modifier = Modifier.height(6.dp))
-
-          Text(
-            "${100 - (xp % 100)} XP more to level up!",
-            color = Color.Gray,
-            fontSize = 11.sp,
-            textAlign = TextAlign.End,
-            modifier = Modifier.fillMaxWidth()
-          )
-
-          Spacer(modifier = Modifier.height(14.dp))
-
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-          ) {
-            Icon(imageVector = Icons.Default.Check, contentDescription = "Daily Streak", tint = NeonCyan, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Active Streak:", color = Color.Gray, fontSize = 13.sp)
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Text("$streak Continuous Days", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+              Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = GlassyCard,
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(14.dp),
+                  verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🏆", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                      Text("Savannah Alpha Pathfinder", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                      Text("Initiated signal beacon on early trial phase", color = Color.Gray, fontSize = 10.sp)
+                    }
+                  }
+                  HorizontalDivider(color = Color.White.copy(alpha = 0.05f), thickness = 1.dp)
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🎙️", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                      Text("Atmosphere Harmonizer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                      Text("Disseminated high-vibe transmissions into the feed", color = Color.Gray, fontSize = 10.sp)
+                    }
+                  }
+                }
+              }
+            }
           }
         }
-      }
-    }
+        2 -> {
+          // --- TAB 2: EXTREMELY MODERN CONTROL SETTINGS PAGE ---
 
-    // Display list of achievements unlocked inside Bento grid
-    item {
-      Column(modifier = Modifier.fillMaxWidth()) {
-        Text("Unlocked Achievements", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 10.dp))
+          // SECTION 1: SYSTEM STYLING & CORE IDENTITY
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(20.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                  "Cosmic Base Themes",
+                  color = NeonCyan,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(bottom = 8.dp)
+                )
 
-        Surface(
-          modifier = Modifier.fillMaxWidth(),
-          color = GlassyCard,
-          shape = RoundedCornerShape(20.dp),
-          border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-        ) {
-          Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text("🏆", fontSize = 24.sp)
-              Spacer(modifier = Modifier.width(12.dp))
-              Column {
-                Text("Savannah Pioneer", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Text("Joined during early alpha state", color = Color.Gray, fontSize = 11.sp)
+                Row(
+                  modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                  horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                  val modes = listOf("Obsidian Glow", "Cyber Horizontal", "Solar Savannah", "Bento Drift")
+                  modes.forEach { md ->
+                    val sel = selectedThemeMode == md
+                    Surface(
+                      modifier = Modifier.clickable {
+                        selectedThemeMode = md
+                        prefs.edit().putString("selected_orbit_theme", md).apply()
+                        android.widget.Toast.makeText(context, "Theme balanced to: $md!", android.widget.Toast.LENGTH_SHORT).show()
+                      },
+                      shape = RoundedCornerShape(8.dp),
+                      color = if (sel) NeonCyan.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.04f),
+                      border = BorderStroke(1.dp, if (sel) NeonCyan else Color.White.copy(alpha = 0.1f))
+                    ) {
+                      Text(
+                        text = md,
+                        color = if (sel) NeonCyan else Color.LightGray,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                      )
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // SECTION 2: SIGNAL ENCRYPTION & QUANTUM BANDS (NEW HIGH-FIDELITY FEATURES!)
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(20.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                  "Signal Protocols",
+                  color = NeonCyan,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold
+                )
+
+                // Stealth signal mode toggle
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text("Quantum Stealth Cloak", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Masks real-time coordinate broadcasts behind secure proxy blocks", color = Color.Gray, fontSize = 9.sp)
+                  }
+
+                  Switch(
+                    checked = stealthModeEnabled,
+                    onCheckedChange = {
+                      stealthModeEnabled = it
+                      prefs.edit().putBoolean("stealth_mode_enabled", it).apply()
+                    },
+                    colors = SwitchDefaults.colors(
+                      checkedThumbColor = Color.Black,
+                      checkedTrackColor = SoftNeonMint,
+                      uncheckedThumbColor = Color.Gray,
+                      uncheckedTrackColor = Color.White.copy(alpha = 0.05f)
+                    )
+                  )
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.04f), thickness = 1.dp)
+
+                // Quantum Communication frequency sector selection
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                  Text("Quantum Frequency Tuning Band", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  Text("Calibrate current companion whisper response wavelengths", color = Color.Gray, fontSize = 9.sp)
+
+                  Spacer(modifier = Modifier.height(4.dp))
+
+                  val bands = listOf("2.4 GHz Quantum Flare", "5.8 GHz Hyperwave", "8.0 GHz Astro Link")
+                  Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                  ) {
+                    bands.forEach { bnd ->
+                      val matched = frequencyBand == bnd
+                      Surface(
+                        modifier = Modifier
+                          .weight(1f)
+                          .clickable {
+                            frequencyBand = bnd
+                            prefs.edit().putString("frequency_band", bnd).apply()
+                          },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (matched) BentoIndigo.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.03f),
+                        border = BorderStroke(1.dp, if (matched) NeonCyan else Color.White.copy(alpha = 0.08f))
+                      ) {
+                        Text(
+                          text = bnd.split(" ")[0] + " " + bnd.split(" ")[1],
+                          textAlign = TextAlign.Center,
+                          color = if (matched) NeonCyan else Color.Gray,
+                          fontSize = 10.sp,
+                          fontWeight = FontWeight.Bold,
+                          modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // SECTION 3: IMMERSIVE TELEMETRY DIAGNOSTIC CORE
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(20.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                  "Transceiver Telemetry Diagnostics",
+                  color = NeonCyan,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(bottom = 10.dp)
+                )
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Signal strength: Strong (100%) 📡", color = Color.LightGray, fontSize = 11.sp)
+                    Text("Connection Ping latency: 26ms", color = Color.LightGray, fontSize = 11.sp)
+                    Text("Security Level: AstroCrypt v4.1", color = SoftNeonMint, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                  }
+
+                  // Small circular meter diagram drawing
+                  Box(
+                    modifier = Modifier
+                      .size(52.dp)
+                      .clip(CircleShape)
+                      .background(Color.White.copy(alpha = 0.04f))
+                      .border(1.dp, SoftNeonMint.copy(alpha = 0.2f), CircleShape),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                      Text("COMP", color = SoftNeonMint, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                      Text("OK ✓", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // SECTION 4: STORAGE OPTIMIZATION CORE
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(20.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                  "Storage Telemetry Purge",
+                  color = NeonCyan,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column {
+                    Text("Disposable database blocks:", color = Color.Gray, fontSize = 10.sp)
+                    Text(cacheValue, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                  }
+
+                  if (isOptimizingCache) {
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                      CircularProgressIndicator(color = NeonCyan, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                      Text(optimizationStatusText, color = Color.Gray, fontSize = 10.sp)
+                    }
+                  } else {
+                    Button(
+                      onClick = {
+                        scope.launch {
+                          isOptimizingCache = true
+                          optimizationStatusText = "Sifting..."
+                          delay(500)
+                          optimizationStatusText = "Defragmenting..."
+                          delay(400)
+                          cacheValue = "0.0 KB"
+                          isOptimizingCache = false
+                          android.widget.Toast.makeText(context, "Orbital database defragmentation successful!", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                      },
+                      colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                      shape = RoundedCornerShape(10.dp),
+                      modifier = Modifier.height(32.dp),
+                      contentPadding = PaddingValues(horizontal = 12.dp)
+                    ) {
+                      Text("Full Vacuum Purge", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // SECTION 5: REAL-TIME NOTIFICATIONS SWITCHES
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(20.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                  "Relay Alert Configurations",
+                  color = NeonCyan,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold
+                )
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text("Orbit Beacon Pings", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Receive notification on new incoming peer feeds", color = Color.Gray, fontSize = 9.sp)
+                  }
+
+                  Switch(
+                    checked = beaconNotifsEnabled,
+                    onCheckedChange = {
+                      beaconNotifsEnabled = it
+                      prefs.edit().putBoolean("beacon_notifs_enabled", it).apply()
+                    },
+                    colors = SwitchDefaults.colors(
+                      checkedThumbColor = Color.Black,
+                      checkedTrackColor = NeonCyan,
+                      uncheckedThumbColor = Color.Gray,
+                      uncheckedTrackColor = Color.White.copy(alpha = 0.05f)
+                    )
+                  )
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.04f), thickness = 1.dp)
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text("Auditory Chime Vibrations", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Chimes acoustic frequencies when peer chat whisper lands", color = Color.Gray, fontSize = 9.sp)
+                  }
+
+                  Switch(
+                    checked = frequencyChimesEnabled,
+                    onCheckedChange = {
+                      frequencyChimesEnabled = it
+                      prefs.edit().putBoolean("frequency_chimes_enabled", it).apply()
+                    },
+                    colors = SwitchDefaults.colors(
+                      checkedThumbColor = Color.Black,
+                      checkedTrackColor = NeonCyan,
+                      uncheckedThumbColor = Color.Gray,
+                      uncheckedTrackColor = Color.White.copy(alpha = 0.05f)
+                    )
+                  )
+                }
               }
             }
           }
         }
       }
-    }
 
-    // Log Out button in Bento block style
-    item {
-      Button(
-        onClick = onLogOut,
-        colors = ButtonDefaults.buttonColors(
-          containerColor = Color.White.copy(alpha = 0.05f),
-          contentColor = Color(0xFFE71D36)
-        ),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, Color(0xFFE71D36).copy(alpha = 0.2f)),
-        modifier = Modifier.fillMaxWidth().testTag("logout_button")
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+      // INTEGRATE SECURE DEREGISTER EXCURSION BUTTON AT THE BOTTOM
+      item {
+        Button(
+          onClick = onLogOut,
+          colors = ButtonDefaults.buttonColors(
+            containerColor = Color.White.copy(alpha = 0.04f),
+            contentColor = Color(0xFFE71D36)
+          ),
+          shape = RoundedCornerShape(16.dp),
+          border = BorderStroke(1.dp, Color(0xFFE71D36).copy(alpha = 0.3f)),
+          modifier = Modifier.fillMaxWidth().testTag("logout_button")
         ) {
-          Icon(
-            imageVector = Icons.Default.Close,
-            contentDescription = "Log out",
-            tint = Color(0xFFE71D36),
-            modifier = Modifier.size(16.dp)
-          )
-          Text("Deregister Explorer / Sign Out", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(vertical = 4.dp)
+          ) {
+            Icon(imageVector = Icons.Default.Close, contentDescription = "Log out", tint = Color(0xFFE71D36), modifier = Modifier.size(16.dp))
+            Text("Deregister Signal & Quit", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          }
         }
       }
     }
   }
-}
 
   // ----------------------------------------------------------------------------
   // MOOD SELECTOR DROPDOWN POPUP
@@ -4541,7 +5401,6 @@ fun IdentityTab(
   // PROFILE EDITING DIALOG POPUP
   // ----------------------------------------------------------------------------
   // Modern profile editing state variables
-  val scope = rememberCoroutineScope()
   var isSavingProfile by remember { mutableStateOf(false) }
   var profileEditError by remember { mutableStateOf("") }
   var editOtpRequiredMode by remember { mutableStateOf(false) }
@@ -7198,6 +8057,108 @@ fun ShimmerPlaceholder(
 }
 
 // ----------------------------------------------------------------------------
+// 🌟 CUSTOM HELPER GRAPHICS COMPONENTS (AVATAR & VIDEO PLAYER)
+// ----------------------------------------------------------------------------
+@Composable
+fun ExplorerAvatar(
+  avatarUrl: String?,
+  name: String?,
+  size: androidx.compose.ui.unit.Dp = 40.dp,
+  modifier: Modifier = Modifier,
+  borderWidth: androidx.compose.ui.unit.Dp = 1.dp,
+  borderColor: Color = Color.White.copy(alpha = 0.15f),
+  onClick: (() -> Unit)? = null
+) {
+  val baseName = name ?: "Pioneer"
+  val initial = baseName.take(1).uppercase()
+  
+  var cardModifier = modifier
+    .size(size)
+    .clip(CircleShape)
+  if (onClick != null) {
+    cardModifier = cardModifier.clickable { onClick() }
+  }
+
+  Box(
+    modifier = cardModifier
+      .background(Brush.linearGradient(listOf(Color(0xFF1E293B), Color(0xFF0F172A))))
+      .border(borderWidth, borderColor, CircleShape),
+    contentAlignment = Alignment.Center
+  ) {
+    if (!avatarUrl.isNullOrBlank()) {
+      AsyncImage(
+        model = avatarUrl,
+        contentDescription = "avatar of $baseName",
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = Modifier.fillMaxSize().clip(CircleShape)
+      )
+    } else {
+      val initialsBrush = Brush.linearGradient(listOf(NeonCyan, SoftNeonMint))
+      Text(
+        text = initial,
+        style = TextStyle(
+          brush = initialsBrush,
+          fontWeight = FontWeight.ExtraBold,
+          fontSize = (size.value * 0.42).sp
+        )
+      )
+    }
+  }
+}
+
+@Composable
+fun VideoPlayerView(
+  mediaUrl: String,
+  isActivated: Boolean,
+  modifier: Modifier = Modifier
+) {
+  val context = LocalContext.current
+  val cleanUrl = remember(mediaUrl) {
+    if (mediaUrl.isNullOrEmpty() || mediaUrl.contains("mixkit") || !mediaUrl.startsWith("http")) {
+      "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+    } else {
+      mediaUrl
+    }
+  }
+
+  AndroidView(
+    factory = { ctx ->
+      android.widget.VideoView(ctx).apply {
+        layoutParams = android.view.ViewGroup.LayoutParams(
+          android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+          android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        setVideoPath(cleanUrl)
+        setOnErrorListener { _, _, _ -> true }
+        setOnPreparedListener { mp ->
+          mp.isLooping = true
+          mp.setVolume(0f, 0f)
+          if (isActivated) {
+            mp.start()
+          }
+        }
+      }
+    },
+    update = { videoView ->
+      try {
+        if (isActivated) {
+          if (!videoView.isPlaying) {
+            videoView.start()
+          }
+        } else {
+          if (videoView.isPlaying) {
+            videoView.pause()
+          }
+        }
+      } catch (e: Exception) {
+        // Safe failover
+      }
+    },
+    modifier = modifier.fillMaxSize()
+  )
+}
+
+// ----------------------------------------------------------------------------
 // 🌀 MODERN NEON ORBIT PULL-TO-REFRESH COMPONENT
 // ----------------------------------------------------------------------------
 @Composable
@@ -7209,45 +8170,69 @@ fun ModernPullToRefresh(
   var pullOffset by remember { mutableStateOf(0f) }
   val maxPullOffset = 260f
   val coroutineScope = rememberCoroutineScope()
-  
+
+  val nestedScrollConnection = remember(isRefreshing) {
+    object : NestedScrollConnection {
+      override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        if (isRefreshing) return Offset.Zero
+        if (available.y < 0 && pullOffset > 0f) {
+          val prevOffset = pullOffset
+          pullOffset = (pullOffset + available.y * 0.5f).coerceAtLeast(0f)
+          val delta = pullOffset - prevOffset
+          return Offset(0f, delta / 0.5f)
+        }
+        return Offset.Zero
+      }
+
+      override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: NestedScrollSource
+      ): Offset {
+        if (isRefreshing) return Offset.Zero
+        if (available.y > 0f) {
+          val prevOffset = pullOffset
+          pullOffset = (pullOffset + available.y * 0.5f).coerceAtMost(maxPullOffset)
+          val delta = pullOffset - prevOffset
+          return Offset(0f, delta / 0.5f)
+        }
+        return Offset.Zero
+      }
+
+      override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+        if (pullOffset > 160f) {
+          onRefresh()
+        }
+        coroutineScope.launch {
+          androidx.compose.animation.core.animate(
+            initialValue = pullOffset,
+            targetValue = 0f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+          ) { value, _ ->
+            pullOffset = value
+          }
+        }
+        return Velocity.Zero
+      }
+    }
+  }
+
+  LaunchedEffect(isRefreshing) {
+    if (!isRefreshing && pullOffset > 0f) {
+      androidx.compose.animation.core.animate(
+        initialValue = pullOffset,
+        targetValue = 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+      ) { value, _ ->
+        pullOffset = value
+      }
+    }
+  }
+
   Box(
     modifier = Modifier
       .fillMaxSize()
-      .pointerInput(isRefreshing) {
-        if (isRefreshing) return@pointerInput
-        detectVerticalDragGestures(
-          onDragStart = {},
-          onDragEnd = {
-            if (pullOffset > 100f) {
-              onRefresh()
-            }
-            coroutineScope.launch {
-              androidx.compose.animation.core.animate(
-                initialValue = pullOffset,
-                targetValue = 0f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
-              ) { value, _ ->
-                pullOffset = value
-              }
-            }
-          },
-          onDragCancel = {
-            coroutineScope.launch {
-              androidx.compose.animation.core.animate(
-                initialValue = pullOffset,
-                targetValue = 0f
-              ) { value, _ ->
-                pullOffset = value
-              }
-            }
-          },
-          onVerticalDrag = { change, dragAmount ->
-            change.consume()
-            val newOffset = (pullOffset + dragAmount * 0.45f).coerceIn(0f, maxPullOffset)
-            pullOffset = newOffset
-          }
-        )
-      }
+      .nestedScroll(nestedScrollConnection)
   ) {
     Box(
       modifier = Modifier
@@ -7266,9 +8251,9 @@ fun ModernPullToRefresh(
           .padding(top = 16.dp)
           .graphicsLayer {
             translationY = if (isRefreshing) 0f else (pullOffset - 80f).coerceAtLeast(0f)
-            alpha = (pullOffset / 90f).coerceIn(0f, 1f)
-            scaleX = (pullOffset / 140f).coerceIn(0.8f, 1.15f)
-            scaleY = (pullOffset / 140f).coerceIn(0.8f, 1.15f)
+            alpha = if (isRefreshing) 1f else (pullOffset / 90f).coerceIn(0f, 1f)
+            scaleX = if (isRefreshing) 1f else (pullOffset / 140f).coerceIn(0.8f, 1.15f)
+            scaleY = if (isRefreshing) 1f else (pullOffset / 140f).coerceIn(0.8f, 1.15f)
           }
           .background(Color(0xFF1E1E28), RoundedCornerShape(28.dp))
           .border(1.5.dp, NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(28.dp))
