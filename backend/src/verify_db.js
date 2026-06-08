@@ -30,6 +30,18 @@ async function verifyTables() {
         console.error(`Table '${tableName}' is MISSING.`);
       }
     }
+
+    // Check for posts
+    const postsRes = await pool.query('SELECT COUNT(*) FROM posts');
+    console.log(`Total posts in database: ${postsRes.rows[0].count}`);
+
+    // Check for users
+    const usersRes = await pool.query('SELECT COUNT(*) FROM users');
+    console.log(`Total users in database: ${usersRes.rows[0].count}`);
+
+    // Check for profiles
+    const profilesRes = await pool.query('SELECT COUNT(*) FROM profiles');
+    console.log(`Total profiles in database: ${profilesRes.rows[0].count}`);
   } catch (err) {
     console.error('Error during verification:', err);
   } finally {

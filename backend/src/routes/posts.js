@@ -14,7 +14,7 @@ router.get('/', authMiddleware, async (req, res) => {
     let posts = [];
 
     if (!dbService.isMock) {
-      let queryText = 'SELECT p.*, pr.display_name, pr.avatar_url, u.username, EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked FROM posts p JOIN profiles pr ON p.author_id = pr.user_id JOIN users u ON p.author_id = u.id';
+      let queryText = 'SELECT p.*, pr.display_name, pr.avatar_url, u.username, EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked FROM posts p LEFT JOIN profiles pr ON p.author_id = pr.user_id LEFT JOIN users u ON p.author_id = u.id';
       const params = [req.user.id];
 
       if (category) {
@@ -27,6 +27,7 @@ router.get('/', authMiddleware, async (req, res) => {
 
       queryText += ' ORDER BY p.created_at DESC LIMIT 50';
       const feedRes = await dbService.query(queryText, params);
+      console.log(`[Posts] DB returned ${feedRes.rows.length} posts.`);
       posts = feedRes.rows;
     } else {
       const store = dbService.getMockStore();
