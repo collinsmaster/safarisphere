@@ -3,6 +3,7 @@ const router = express.Router();
 const dbService = require('../services/dbService');
 const aiService = require('../services/aiService');
 const authMiddleware = require('../middleware/auth');
+const { v4: uuidv4 } = require('uuid');
 
 // 1. FETCH ALL FEED POSTS WITH DISCOVERY FILTERING
 router.get('/', authMiddleware, async (req, res) => {
@@ -66,7 +67,7 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
-    console.log(`[Posts] Creating post for user ${req.user.id}. Content: ${content?.substring(0, 30)}...`);
+    console.log(`[Posts] Creating post for user ${req.user.id}. Content: ${content?.substring(0, 30)}... MediaUrl: ${mediaUrl}, MediaType: ${mediaType}`);
 
     // TRIGGER ACTUAL AI MODERATION HOOK
     if (content) {
@@ -80,13 +81,17 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     }
 
-    const postId = `p_${Date.now()}`;
+    const postId = uuidv4();
+    const newPost = {
+    const allowedMediaTypes = ['text', 'image', 'video'];
+    const validatedMediaType = allowedMediaTypes.includes(mediaType) ? mediaType : 'text';
+    
     const newPost = {
       id: postId,
       author_id: req.user.id,
       content: content || '',
       media_url: mediaUrl || null,
-      media_type: mediaType || 'text',
+      media_type: validatedMediaType,
       vibe_category: vibeCategory || 'General',
       lat: lat || null,
       lng: lng || null,
@@ -104,7 +109,7 @@ router.post('/', authMiddleware, async (req, res) => {
           `INSERT INTO posts 
             (id, author_id, content, media_url, media_type, vibe_category, lat, lng, location_name) 
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [postId, req.user.id, content || '', mediaUrl, mediaType, vibeCategory, lat, lng, locationName]
+          [postId, req.user.id, content || '', mediaUrl, validatedMediaType, vibeCategory, lat, lng, locationName]
         );
         console.log(`[Posts] Post inserted successfully into DB for user ${req.user.id}. PostId: ${postId}`);
       } catch (dbErr) {
@@ -252,7 +257,7 @@ router.post('/:id/comments', authMiddleware, async (req, res) => {
   }
 
   try {
-    const commentId = `c_${Date.now()}`;
+    const commentId = uuidv4();
     const commentObj = {
       id: commentId,
       post_id: postId,

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const dbService = require('../services/dbService');
 const authMiddleware = require('../middleware/auth');
+const { v4: uuidv4 } = require('uuid');
 
 // 1. GET ALL DIRECT MESSAGE THREADS
 router.get('/', authMiddleware, async (req, res) => {
@@ -37,7 +38,7 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
-    const chatId = `chat_${Date.now()}`;
+    const chatId = uuidv4();
 
     if (!dbService.isMock) {
       // Create chat thread
@@ -125,7 +126,7 @@ router.post('/:id', authMiddleware, async (req, res) => {
   }
 
   try {
-    const messageId = `msg_${Date.now()}`;
+    const messageId = uuidv4();
     const newMsg = {
       id: messageId,
       chat_id: chatId,

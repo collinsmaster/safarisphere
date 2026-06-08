@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const dbService = require('../services/dbService');
 const authMiddleware = require('../middleware/auth');
+const { v4: uuidv4 } = require('uuid');
 
 // 1. GET ACTIVE MOMENTS (STORY BARS)
 router.get('/', async (req, res) => {
@@ -30,7 +31,7 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
-    const momentId = `m_${Date.now()}`;
+    const momentId = uuidv4();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours from now
 
     const newMoment = {

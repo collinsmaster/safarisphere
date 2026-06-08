@@ -7263,27 +7263,28 @@ fun ModernPullToRefresh(
       Box(
         modifier = Modifier
           .align(Alignment.TopCenter)
-          .padding(top = 12.dp)
+          .padding(top = 16.dp)
           .graphicsLayer {
             translationY = if (isRefreshing) 0f else (pullOffset - 80f).coerceAtLeast(0f)
             alpha = (pullOffset / 90f).coerceIn(0f, 1f)
-            scaleX = (pullOffset / 140f).coerceIn(0.6f, 1.1f)
-            scaleY = (pullOffset / 140f).coerceIn(0.6f, 1.1f)
+            scaleX = (pullOffset / 140f).coerceIn(0.8f, 1.15f)
+            scaleY = (pullOffset / 140f).coerceIn(0.8f, 1.15f)
           }
-          .background(Color(0xFF12121A), RoundedCornerShape(20.dp))
-          .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-          .padding(horizontal = 14.dp, vertical = 7.dp)
+          .background(Color(0xFF1E1E28), RoundedCornerShape(28.dp))
+          .border(1.5.dp, NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(28.dp))
+          .shadow(16.dp, RoundedCornerShape(28.dp))
+          .padding(horizontal = 20.dp, vertical = 12.dp)
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
           val transition = rememberInfiniteTransition(label = "pull_ref")
           val rotationAngle by transition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
             animationSpec = infiniteRepeatable(
-              animation = tween(1200, easing = LinearEasing),
+              animation = tween(800, easing = LinearEasing),
               repeatMode = RepeatMode.Restart
             ),
             label = "spin"
@@ -7294,13 +7295,13 @@ fun ModernPullToRefresh(
             contentDescription = "Sync",
             tint = NeonCyan,
             modifier = Modifier
-              .size(16.dp)
+              .size(20.dp)
               .graphicsLayer { rotationZ = rotationAngle }
           )
           Text(
-            text = if (isRefreshing) "Attuning Sphere Channels..." else "Swipe down to Attune",
+            text = if (isRefreshing) "Refreshing..." else "Release to refresh",
             color = Color.White,
-            fontSize = 11.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold
           )
         }
