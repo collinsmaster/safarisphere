@@ -1,52 +1,33 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const useMock = process.env.USE_MOCK_DATABASE === 'true' || !process.env.DATABASE_URL;
-
-let pool = null;
-
-if (!useMock) {
-  try {
-    const config = {
-      connectionString: process.env.DATABASE_URL,
-      ssl: {
-        rejectUnauthorized: false
-      }
-    };
-
-    pool = new Pool(config);
-    console.log('[PostgreSQL] Database pool initialized successfully.');
-
-    // Add logging to catch failures
-    pool.on('error', (err, client) => {
-      console.error('[PostgreSQL] Unexpected error on idle client', err);
-    });
-
-    // Auto-initialize tables inside the production Postgres database!
-    setTimeout(async () => {
-      try {
-        const fs = require('fs');
-        const path = require('path');
-        const schemaPath = path.join(__dirname, '../database/schema.sql');
-        if (fs.existsSync(schemaPath)) {
-          console.log('[PostgreSQL Auto-Init] Ensuring database tables are fully provisioned...');
-          const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-          // pg Client executes multiple statements separated by semicolon cleanly when called as raw text
-          await pool.query(schemaSql);
-          console.log('[PostgreSQL Auto-Init] Database tables and performance indexes successfully verified/created!');
-        }
-      } catch (schemaErr) {
-        console.error('[PostgreSQL Auto-Init Error] Failed to auto-provision tables:', schemaErr.message);
-      }
-    }, 1000);
-  } catch (err) {
-    console.error('[PostgreSQL] Error initializing pool:', err); // Log the full error object
-    console.log('[PostgreSQL] Falling back to in-memory mock database.');
-    pool = null;
+// Enforce production database connectivity
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
   }
-} else {
-  console.log('[PostgreSQL] Running in MOCK mode. Safe in-memory database will be utilized.');
-}
+});
+
+console.log('[PostgreSQL] Database pool initialized.');
+
+// Auto-initialize tables inside the production Postgres database!
+setTimeout(async () => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const schemaPath = path.join(__dirname, '../database/schema.sql');
+    if (fs.existsSync(schemaPath)) {
+      console.log('[PostgreSQL Auto-Init] Ensuring database tables are fully provisioned...');
+      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+      // pg Client executes multiple statements separated by semicolon cleanly when called as raw text
+      await pool.query(schemaSql);
+      console.log('[PostgreSQL Auto-Init] Database tables and performance indexes successfully verified/created!');
+    }
+  } catch (schemaErr) {
+    console.error('[PostgreSQL Auto-Init Error] Failed to auto-provision tables:', schemaErr.message);
+  }
+}, 1000);
 
 // In-Memory Database Store for Mock Mode
 const bcrypt = require('bcryptjs');

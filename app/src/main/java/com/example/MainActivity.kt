@@ -5936,62 +5936,67 @@ fun BentoAuthScreen(
                     modifier = Modifier.padding(bottom = 12.dp)
                   )
 
-                  OutlinedTextField(
-                    value = forgotNewPasswordInput,
-                    onValueChange = { forgotNewPasswordInput = it },
-                    placeholder = { Text("New Passphrase", color = Color.Gray) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedBorderColor = NeonCyan,
-                      unfocusedBorderColor = Color.DarkGray,
-                      focusedTextColor = Color.White,
-                      unfocusedTextColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("forgot_new_password_input"),
-                    singleLine = true
-                  )
-
-                  Spacer(modifier = Modifier.height(10.dp))
-
-                  OutlinedTextField(
-                    value = forgotConfirmPasswordInput,
-                    onValueChange = { forgotConfirmPasswordInput = it },
-                    placeholder = { Text("Confirm New Passphrase", color = Color.Gray) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                      focusedBorderColor = NeonCyan,
-                      unfocusedBorderColor = Color.DarkGray,
-                      focusedTextColor = Color.White,
-                      unfocusedTextColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("forgot_confirm_password_input"),
-                    singleLine = true
-                  )
-
-                  Spacer(modifier = Modifier.height(14.dp))
-
-                  Text("COSMIC SECURITY CHECKS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                  Spacer(modifier = Modifier.height(6.dp))
-                  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val rules = listOf(
-                      Triple(passLengthOk, "At least 6 characters in length", "1"),
-                      Triple(passHasLetter, "Contains alphanumeric alphabetic letters", "2"),
-                      Triple(passHasDigit, "Contains digital numerical parameters", "3"),
-                      Triple(passHasSymbol, "Contains special characters/symbols", "4"),
-                      Triple(true, "NEW: Must not match previous old password", "5")
+                  Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                  ) {
+                    OutlinedTextField(
+                      value = forgotNewPasswordInput,
+                      onValueChange = { forgotNewPasswordInput = it },
+                      placeholder = { Text("New Passphrase", color = Color.Gray) },
+                      visualTransformation = PasswordVisualTransformation(),
+                      colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = Color.DarkGray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                      ),
+                      shape = RoundedCornerShape(12.dp),
+                      modifier = Modifier.fillMaxWidth().testTag("forgot_new_password_input"),
+                      singleLine = true
                     )
-                    rules.forEach { (ok, ruleLabel, code) ->
-                      Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                          imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
-                          contentDescription = "Status",
-                          tint = if (ok) SoftNeonMint else Color.Gray,
-                          modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(ruleLabel, color = if (ok) Color.LightGray else Color.Gray, fontSize = 11.sp)
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                      value = forgotConfirmPasswordInput,
+                      onValueChange = { forgotConfirmPasswordInput = it },
+                      placeholder = { Text("Confirm New Passphrase", color = Color.Gray) },
+                      visualTransformation = PasswordVisualTransformation(),
+                      colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonCyan,
+                        unfocusedBorderColor = Color.DarkGray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                      ),
+                      shape = RoundedCornerShape(12.dp),
+                      modifier = Modifier.fillMaxWidth().testTag("forgot_confirm_password_input"),
+                      singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text("COSMIC SECURITY CHECKS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                      val rules = listOf(
+                        Triple(passLengthOk, "At least 6 characters in length", "1"),
+                        Triple(passHasLetter, "Contains alphanumeric alphabetic letters", "2"),
+                        Triple(passHasDigit, "Contains digital numerical parameters", "3"),
+                        Triple(passHasSymbol, "Contains special characters/symbols", "4"),
+                        Triple(true, "NEW: Must not match previous old password", "5")
+                      )
+                      rules.forEach { (ok, ruleLabel, code) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                          Icon(
+                            imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = "Status",
+                            tint = if (ok) SoftNeonMint else Color.Gray,
+                            modifier = Modifier.size(13.dp)
+                          )
+                          Spacer(modifier = Modifier.width(6.dp))
+                          Text(ruleLabel, color = if (ok) Color.LightGray else Color.Gray, fontSize = 11.sp)
+                        }
                       }
                     }
                   }

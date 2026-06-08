@@ -38,6 +38,10 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request Logger
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
+
 // Global Rate Limiting to prevent denial of service (DoS) attacks
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
