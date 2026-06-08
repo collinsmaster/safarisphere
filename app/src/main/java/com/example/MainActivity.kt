@@ -7218,7 +7218,7 @@ fun ModernPullToRefresh(
         detectVerticalDragGestures(
           onDragStart = {},
           onDragEnd = {
-            if (pullOffset > 140f) {
+            if (pullOffset > 100f) {
               onRefresh()
             }
             coroutineScope.launch {

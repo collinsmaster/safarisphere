@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 
 // 1. FETCH ALL FEED POSTS WITH DISCOVERY FILTERING
 router.get('/', authMiddleware, async (req, res) => {
+  console.log('[Posts] Loading posts route');
   const { category, hashtag } = req.query;
 
   try {
@@ -16,6 +17,11 @@ router.get('/', authMiddleware, async (req, res) => {
 
     if (!dbService.isMock) {
       let queryText = 'SELECT p.*, pr.display_name, pr.avatar_url, u.username, EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $1) as has_liked FROM posts p LEFT JOIN profiles pr ON p.author_id = pr.user_id LEFT JOIN users u ON p.author_id = u.id';
+      
+      // DEBUG: CHECK TOTAL POSTS
+      const countRes = await dbService.query('SELECT COUNT(*) FROM posts');
+      console.log(`[Posts] DEBUG: Total posts in table: ${countRes.rows[0].count}`);
+
       const params = [req.user.id];
 
       if (category) {
@@ -82,7 +88,6 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     const postId = uuidv4();
-    const newPost = {
     const allowedMediaTypes = ['text', 'image', 'video'];
     const validatedMediaType = allowedMediaTypes.includes(mediaType) ? mediaType : 'text';
     
