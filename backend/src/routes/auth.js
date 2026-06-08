@@ -250,6 +250,8 @@ router.post('/login', async (req, res) => {
   }
 
   try {
+    console.log(`[Auth] Attempting login for username/email: ${username}`);
+    
     let user = null;
     let profile = null;
 

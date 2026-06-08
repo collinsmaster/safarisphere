@@ -76,12 +76,15 @@ class AIService {
     const prompt = `Analyze this ${contentType}: "${text}"`;
     
     try {
+      console.log(`[ContentGuard AI] Analyzing ${contentType}: ${text.substring(0, 50)}...`);
       const rawResponse = await this.generateResponse(system, prompt);
+      console.log(`[ContentGuard AI] Raw response: ${rawResponse}`);
+      
       // Strip markdown wrapper if present
       const cleanedJson = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
       return JSON.parse(cleanedJson);
     } catch (err) {
-      console.error('[ContentGuard AI] Moderation parse failure. Defaulting to safe passage.');
+      console.error('[ContentGuard AI] Moderation parse failure. Text:', text, 'Error:', err);
       return { isSafe: true, reason: 'Approved via heuristic parser', toxicityScore: 0.1 };
     }
   }

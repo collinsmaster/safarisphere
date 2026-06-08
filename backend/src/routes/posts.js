@@ -9,6 +9,8 @@ router.get('/', authMiddleware, async (req, res) => {
   const { category, hashtag } = req.query;
 
   try {
+    console.log(`[Posts] Fetching posts. Category: ${category}, Hashtag: ${hashtag}, UserId: ${req.user.id}`);
+    
     let posts = [];
 
     if (!dbService.isMock) {
@@ -61,6 +63,8 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
+    console.log(`[Posts] Creating post for user ${req.user.id}. Content: ${content?.substring(0, 30)}...`);
+
     // TRIGGER ACTUAL AI MODERATION HOOK
     if (content) {
       const moderation = await aiService.moderateContent('post', content);
