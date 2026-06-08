@@ -17,6 +17,11 @@ if (!useMock) {
     pool = new Pool(config);
     console.log('[PostgreSQL] Database pool initialized successfully.');
 
+    // Add logging to catch failures
+    pool.on('error', (err, client) => {
+      console.error('[PostgreSQL] Unexpected error on idle client', err);
+    });
+
     // Auto-initialize tables inside the production Postgres database!
     setTimeout(async () => {
       try {
@@ -35,7 +40,7 @@ if (!useMock) {
       }
     }, 1000);
   } catch (err) {
-    console.error('[PostgreSQL] Error initializing pool:', err.message);
+    console.error('[PostgreSQL] Error initializing pool:', err); // Log the full error object
     console.log('[PostgreSQL] Falling back to in-memory mock database.');
     pool = null;
   }

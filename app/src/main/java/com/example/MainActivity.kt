@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity() {
 fun SafariSphereApp() {
   var selectedTab by remember { mutableStateOf(0) }
   val scope = rememberCoroutineScope()
+  val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 5 })
 
   val context = LocalContext.current
   val db = remember {
@@ -661,7 +662,7 @@ fun SafariSphereApp() {
     )
   } else {
     Scaffold(
-    modifier = Modifier.fillMaxSize(),
+      modifier = Modifier.fillMaxSize().imePadding(),
     containerColor = DeepObsidian,
     topBar = {
       CenterAlignedTopAppBar(
@@ -803,7 +804,9 @@ fun SafariSphereApp() {
           val isSelected = selectedTab == index
           NavigationBarItem(
             selected = isSelected,
-            onClick = { selectedTab = index },
+            onClick = { 
+                scope.launch { pagerState.animateScrollToPage(index) }
+              },
             icon = {
               Icon(
                 imageVector = icon,
@@ -838,14 +841,6 @@ fun SafariSphereApp() {
           )
         )
     ) {
-      val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 5 })
-
-      LaunchedEffect(selectedTab) {
-        if (pagerState.currentPage != selectedTab) {
-          pagerState.animateScrollToPage(selectedTab)
-        }
-      }
-
       LaunchedEffect(pagerState.currentPage) {
         selectedTab = pagerState.currentPage
       }
