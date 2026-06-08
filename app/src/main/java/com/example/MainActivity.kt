@@ -1,6 +1,13 @@
 package com.example
 
 import android.os.Bundle
+import androidx.room.Room
+import com.example.data.AppDatabase
+import com.example.data.MobilePost
+import com.example.data.MobileRoom
+import com.example.data.MobileMoment
+import com.example.data.MobileChatMessage
+import com.example.data.MobileCommunity
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -48,12 +55,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
-import androidx.media3.common.MediaItem
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
-import androidx.compose.ui.viewinterop.AndroidView
-import com.example.data.AppDatabase
-import androidx.room.Room
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.content.Context
@@ -155,68 +156,12 @@ fun getComposeColorFilter(filterName: String): androidx.compose.ui.graphics.Colo
   }
 }
 
-// Add this component to your helper components section
-@Composable
-fun RobustVideoPlayer(
-    videoUrl: String,
-    modifier: Modifier = Modifier,
-    playImmediately: Boolean = false,
-    autoPlay: Boolean = false,
-    loop: Boolean = true
-) {
-    val context = LocalContext.current
-    var isReady by remember { mutableStateOf(false) }
-    
-    val exoPlayer = remember(videoUrl) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(videoUrl))
-            repeatMode = if (loop) ExoPlayer.REPEAT_MODE_ONE else ExoPlayer.REPEAT_MODE_OFF
-            prepare()
-            playWhenReady = playImmediately || autoPlay
-        }
-    }
-
-    DisposableEffect(videoUrl) {
-        onDispose {
-            exoPlayer.release()
-        }
-    }
-    
-    // Auto-play listener could potentially go here if autoPlay is dynamic (toggled)
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = true
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-        
-        // Simple loading indicator
-        if (!isReady) {
-            CircularProgressIndicator(color = NeonCyan)
-        }
-    }
-}
-
-
-// Preset cybernetic avatars helper
-private val avatarPresets = listOf(
-  "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150",
-  "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150",
-  "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150",
-  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=150"
-)
-
+// ==============================================================================
+// 🌟 SAFARI SPHERE MAIN ENTRYPOINT & UI ENGINE
+// ==============================================================================
 class MainActivity : ComponentActivity() {
-  lateinit var database: AppDatabase
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    database = Room.databaseBuilder(applicationContext, AppDatabase::class.java, "safarisphere_db").build()
-    // ... rest of onCreate
     enableEdgeToEdge()
     setContent {
       MyApplicationTheme {
@@ -226,54 +171,7 @@ class MainActivity : ComponentActivity() {
   }
 }
 
-// Data models reflecting backend entities
-data class MobilePost(
-  val id: String,
-  val author: String,
-  val username: String,
-  val avatarUrl: String,
-  val content: String,
-  val vibeCategory: String,
-  var likes: Int,
-  var hasLiked: Boolean = false,
-  val created: String,
-  val mediaUrl: String? = null,
-  val mediaType: String? = "text",
-  val commentsCount: Int = 0
-)
-
-data class MobileRoom(
-  val id: String,
-  val title: String,
-  val host: String,
-  val description: String,
-  val theme: String,
-  var membersCount: Int,
-  val maxMembers: Int = 50
-)
-
-data class MobileMoment(
-  val id: String,
-  val author: String,
-  val emoji: String,
-  val isUnread: Boolean = true
-)
-
-data class MobileChatMessage(
-  val sender: String,
-  val content: String,
-  val isFromMe: Boolean,
-  val time: String
-)
-
-data class MobileCommunity(
-  val id: String,
-  val name: String,
-  val handle: String,
-  val members: Int,
-  val vibe: String,
-  val isJoined: Boolean = false
-)
+// Data models moved to /app/src/main/java/com/example/data/Models.kt
 
 // ==============================================================================
 // 📱 MAIN APPLICATION LAYOUT
@@ -285,6 +183,12 @@ fun SafariSphereApp() {
   val scope = rememberCoroutineScope()
 
   val context = LocalContext.current
+  val db = remember {
+    Room.databaseBuilder(
+      context,
+      AppDatabase::class.java, "safari-sphere-db"
+    ).build()
+  }
   val prefs = remember(context) { context.getSharedPreferences("safari_sphere_prefs", Context.MODE_PRIVATE) }
   var isAuthenticated by remember { mutableStateOf(prefs.getBoolean("is_authenticated", false)) }
   var userNickname by remember { mutableStateOf(prefs.getString("user_nickname", "Pioneer Prime") ?: "Pioneer Prime") }
@@ -297,7 +201,6 @@ fun SafariSphereApp() {
   var userHeadline by remember { mutableStateOf(prefs.getString("user_headline", "Exploring uncharted digital frequencies...") ?: "Exploring uncharted digital frequencies...") }
   var userInterests by remember { mutableStateOf(prefs.getString("user_interests", "Wildlife Safari, Sound Design, Live Beats") ?: "Wildlife Safari, Sound Design, Live Beats") }
   var isFetchingProfile by remember { mutableStateOf(false) }
-  var autoPlayVideo by remember { mutableStateOf(prefs.getBoolean("auto_play_video", true)) }
 
   // State Simulation / Local Fallback Store matching MongoDB / Postgres listings
   val momentsList = remember {
@@ -758,7 +661,7 @@ fun SafariSphereApp() {
     )
   } else {
     Scaffold(
-    modifier = Modifier.fillMaxSize().imePadding(),
+    modifier = Modifier.fillMaxSize(),
     containerColor = DeepObsidian,
     topBar = {
       CenterAlignedTopAppBar(
@@ -2243,6 +2146,21 @@ fun SafariSphereApp() {
                 .padding(horizontal = 12.dp, vertical = 6.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
+              listOf("🦁", "🔥", "✨").forEach { emoji ->
+                Box(
+                  modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable { typingCommentText += emoji }
+                    .padding(2.dp),
+                  contentAlignment = Alignment.Center
+                ) {
+                  Text(emoji, fontSize = 14.sp)
+                }
+              }
+
+              Spacer(modifier = Modifier.width(6.dp))
+
               BasicTextField(
                 value = typingCommentText,
                 onValueChange = { typingCommentText = it },
@@ -2809,11 +2727,6 @@ fun FeedTab(
                 }
 
                 if (isPlaying) {
-                  RobustVideoPlayer(videoUrl = post.mediaUrl.toString(), modifier = Modifier.fillMaxSize())
-                }
-
-                
-                if (!isPlaying) {
                   Box(
                     modifier = Modifier
                       .fillMaxSize()
@@ -3539,6 +3452,8 @@ fun AICompanionTab(
           modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(NeonCyan)
+            .size(48.dp)
+            .testTag("reply_submit_button")
         ) {
           Icon(imageVector = Icons.Default.Send, contentDescription = "Send Secure Message", tint = Color.Black)
         }
@@ -3547,7 +3462,9 @@ fun AICompanionTab(
   }
 }
 
-
+// ==============================================================================
+// 4. DISCOVER TAB (SEARCH & COMMUNITIES)
+// ==============================================================================
 @Composable
 fun DiscoverTab(
   communities: List<MobileCommunity>,
@@ -3558,47 +3475,526 @@ fun DiscoverTab(
   onCommentClicked: (MobilePost) -> Unit
 ) {
   var searchQuery by remember { mutableStateOf("") }
-  val filteredPosts = posts.filter { it.content.contains(searchQuery, ignoreCase = true) || it.vibeCategory.contains(searchQuery, ignoreCase = true) }
-  val filteredExplorers = explorers.filter { it.username.contains(searchQuery, ignoreCase = true) || it.displayName?.contains(searchQuery, ignoreCase = true) == true }
+  var selectedExplorerForProfile by remember { mutableStateOf<BackendExplorer?>(null) }
 
-  Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-    OutlinedTextField(
-      value = searchQuery,
-      onValueChange = { searchQuery = it },
-      modifier = Modifier.fillMaxWidth().testTag("discover_search_input"),
-      placeholder = { Text("Search Posts, Explorers...") },
-      singleLine = true
-    )
-    
-    Spacer(modifier = Modifier.height(16.dp))
-    
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      if (searchQuery.isNotEmpty()) {
-          item { Text("Posts", fontWeight = FontWeight.Bold, color = NeonCyan) }
-          items(filteredPosts) { post ->
-             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (!post.mediaUrl.isNullOrBlank()) {
-                    AsyncImage(model = post.mediaUrl, contentDescription = "Post Thumbnail", modifier = Modifier.size(50.dp).clip(RoundedCornerShape(8.dp)))
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Text(post.content, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-             }
-          }
-          item { Spacer(modifier = Modifier.height(16.dp)) }
-          item { Text("Explorers", fontWeight = FontWeight.Bold, color = NeonCyan) }
-          items(filteredExplorers) { explorer ->
-              Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                  Text(explorer.username, modifier = Modifier.weight(1f))
-                  Surface(color = NeonCyan, shape = RoundedCornerShape(4.dp)) {
-                      Text("USER", fontSize = 10.sp, modifier = Modifier.padding(2.dp), color = Color.Black)
-                  }
+  var isSearchingMockLoading by remember { mutableStateOf(false) }
+  LaunchedEffect(searchQuery) {
+    if (searchQuery.trim().isNotEmpty()) {
+      isSearchingMockLoading = true
+      kotlinx.coroutines.delay(400) // fast mock galaxy processing delay
+      isSearchingMockLoading = false
+    }
+  }
+
+  LazyColumn(
+    modifier = Modifier.fillMaxSize(),
+    contentPadding = PaddingValues(16.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp)
+  ) {
+    // Large Header Search bar textfields
+    item {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(24.dp))
+          .background(Color.White.copy(alpha = 0.02f))
+          .border(
+            width = 1.dp,
+            color = Color.White.copy(alpha = 0.05f),
+            shape = RoundedCornerShape(24.dp)
+          )
+          .padding(18.dp)
+      ) {
+        Text(
+          "Discover the Cosmos",
+          fontSize = 20.sp,
+          fontWeight = FontWeight.ExtraBold,
+          color = Color.White,
+          letterSpacing = (-0.5).sp
+        )
+        Text(
+          "Uncover trending communities and digital landscapes of Safari Sphere",
+          fontSize = 11.sp,
+          color = Color.Gray,
+          modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+        )
+
+        OutlinedTextField(
+          value = searchQuery,
+          onValueChange = { searchQuery = it },
+          placeholder = { Text("Search hashtags, pioneers, communities...", color = Color.Gray, fontSize = 13.sp) },
+          leadingIcon = { 
+            Icon(
+              imageVector = Icons.Default.Search, 
+              contentDescription = "Search icon", 
+              tint = if (searchQuery.isNotEmpty()) NeonCyan else Color.Gray,
+              modifier = Modifier.size(20.dp)
+            ) 
+          },
+          trailingIcon = {
+            if (searchQuery.isNotEmpty()) {
+              IconButton(onClick = { searchQuery = "" }) {
+                Icon(
+                  imageVector = Icons.Default.Clear, 
+                  contentDescription = "Clear Search", 
+                  tint = Color.Gray,
+                  modifier = Modifier.size(18.dp)
+                )
               }
+            }
+          },
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = NeonCyan,
+            unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedContainerColor = Color.Black.copy(alpha = 0.3f),
+            unfocusedContainerColor = Color.Black.copy(alpha = 0.15f)
+          ),
+          shape = RoundedCornerShape(16.dp),
+          modifier = Modifier.fillMaxWidth().testTag("discover_search_input"),
+          singleLine = true
+        )
+      }
+    }
+
+    // Active Explorers horizontal row section
+    val filteredExplorers = if (searchQuery.trim().isEmpty()) {
+      explorers
+    } else {
+      explorers.filter {
+        it.displayName?.contains(searchQuery, ignoreCase = true) == true ||
+        it.username.contains(searchQuery, ignoreCase = true)
+      }
+    }
+
+    val filteredCommunities = if (searchQuery.trim().isEmpty()) {
+      communities
+    } else {
+      communities.filter {
+        it.name.contains(searchQuery, ignoreCase = true) ||
+        it.handle.contains(searchQuery, ignoreCase = true) ||
+        it.vibe.contains(searchQuery, ignoreCase = true)
+      }
+    }
+
+    val filteredPosts = if (searchQuery.trim().isEmpty()) {
+      emptyList()
+    } else {
+      posts.filter {
+        it.content.contains(searchQuery, ignoreCase = true) ||
+        it.author.contains(searchQuery, ignoreCase = true) ||
+        it.username.contains(searchQuery, ignoreCase = true) ||
+        it.vibeCategory.contains(searchQuery, ignoreCase = true)
+      }
+    }
+
+    item {
+      Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+          text = if (searchQuery.trim().isEmpty()) "Savannah Explorers Directory" else "Matched Explorers (${filteredExplorers.size})",
+          color = NeonCyan,
+          fontSize = 13.sp,
+          fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (filteredExplorers.isEmpty()) {
+          Text("No online explorers found matching search query.", color = Color.Gray, fontSize = 11.sp)
+        } else {
+          LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            items(filteredExplorers) { exp ->
+              Surface(
+                modifier = Modifier
+                  .width(135.dp)
+                  .clickable { selectedExplorerForProfile = exp },
+                color = GlassyCard,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+              ) {
+                Column(
+                  modifier = Modifier.padding(12.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                  Box(
+                    modifier = Modifier
+                      .size(42.dp)
+                      .clip(CircleShape)
+                      .background(Color.White.copy(alpha = 0.05f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Text(exp.moodEmoji ?: "🦁", fontSize = 24.sp)
+                  }
+                  Spacer(modifier = Modifier.height(6.dp))
+                  Text(
+                    exp.displayName ?: exp.username,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                  Text(
+                    "@${exp.username}",
+                    color = Color.Gray,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                }
+              }
+            }
           }
+        }
+      }
+    }
+
+    if (searchQuery.trim().isNotEmpty()) {
+      if (isSearchingMockLoading) {
+        // Render 2 awesome post skeleton loaders
+        items(2) {
+          Surface(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            color = GlassyCard,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+          ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                ShimmerPlaceholder(modifier = Modifier.size(40.dp), shape = CircleShape)
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                  ShimmerPlaceholder(modifier = Modifier.width(120.dp).height(12.dp))
+                  Spacer(modifier = Modifier.height(6.dp))
+                  ShimmerPlaceholder(modifier = Modifier.width(80.dp).height(10.dp))
+                }
+              }
+              Spacer(modifier = Modifier.height(14.dp))
+              ShimmerPlaceholder(modifier = Modifier.fillMaxWidth().height(16.dp))
+              Spacer(modifier = Modifier.height(8.dp))
+              ShimmerPlaceholder(modifier = Modifier.fillMaxWidth(0.8f).height(14.dp))
+            }
+          }
+        }
+      } else {
+        // Matched Post section header
+        item {
+          Text(
+            "Matched Cosmic Posts (${filteredPosts.size})",
+            color = Color(0xFFFF9F1C),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 8.dp)
+          )
+        }
+
+        if (filteredPosts.isEmpty()) {
+          item {
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = Color.White.copy(alpha = 0.02f),
+              shape = RoundedCornerShape(16.dp)
+            ) {
+              Box(modifier = Modifier.padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No matching posts drifting in this sphere.", color = Color.Gray, fontSize = 11.sp)
+              }
+            }
+          }
+        } else {
+          items(filteredPosts) { post ->
+            Surface(
+              modifier = Modifier.fillMaxWidth(),
+              color = GlassyCard,
+              shape = RoundedCornerShape(24.dp),
+              border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            ) {
+              Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Box(
+                    modifier = Modifier
+                      .size(36.dp)
+                      .clip(CircleShape)
+                      .background(Color.White.copy(alpha = 0.05f)),
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Text("🦁", fontSize = 16.sp)
+                  }
+                  Spacer(modifier = Modifier.width(10.dp))
+                  Column(modifier = Modifier.weight(1f)) {
+                    Text(post.author, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("@${post.username} • ${post.created}", color = Color.Gray, fontSize = 11.sp)
+                  }
+                  Box(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(8.dp))
+                      .background(NeonCyan.copy(alpha = 0.15f))
+                      .padding(horizontal = 8.dp, vertical = 2.dp)
+                  ) {
+                    Text(post.vibeCategory, color = NeonCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                  }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(post.content, color = Color(0xFFECEFF1), fontSize = 13.sp)
+
+                if (!post.mediaUrl.isNullOrBlank()) {
+                  Spacer(modifier = Modifier.height(10.dp))
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(130.dp)
+                      .clip(RoundedCornerShape(12.dp))
+                  ) {
+                    AsyncImage(
+                      model = post.mediaUrl,
+                      contentDescription = "Search Post Attachment Overlay",
+                      modifier = Modifier.fillMaxSize(),
+                      contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                  }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Text("❤️ ${post.likes} Likes", color = Color.Gray, fontSize = 11.sp)
+
+                  Surface(
+                    modifier = Modifier.clickable { onCommentClicked(post) },
+                    shape = RoundedCornerShape(8.dp),
+                    color = NeonCyan.copy(alpha = 0.1f)
+                  ) {
+                    Text(
+                      "💬 ${post.commentsCount} Comments",
+                      color = NeonCyan,
+                      fontSize = 11.sp,
+                      fontWeight = FontWeight.Bold,
+                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Trending Categories Horizon in Bento style
+    item {
+      Column {
+        Text("Trending Categories", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          val trends = listOf("⛺ Expedition", "🎨 Art & Vibes", "💡 Tech Savanna")
+          trends.forEach { label ->
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(GlassyCard)
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+              Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      }
+    }
+
+    item {
+      HorizontalDivider(color = Color.White.copy(alpha = 0.05f), thickness = 1.dp)
+    }
+
+    // Active Communities List Header
+    item {
+      Text("Recommended Communities", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+
+    // Recommendations Items rendering in Bento grids
+    items(filteredCommunities) { comm ->
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = GlassyCard,
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+      ) {
+        Row(
+          modifier = Modifier.padding(16.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Box(
+            modifier = Modifier
+              .size(46.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color.White.copy(alpha = 0.05f)),
+            contentAlignment = Alignment.Center
+          ) {
+            Text("🏕️", fontSize = 20.sp)
+          }
+
+          Spacer(modifier = Modifier.width(14.dp))
+
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              comm.name,
+              color = Color.White,
+              fontWeight = FontWeight.Bold,
+              fontSize = 14.sp
+            )
+            Text(
+              "@${comm.handle} • ${comm.members} Pioneers",
+              color = Color.Gray,
+              fontSize = 12.sp
+            )
+          }
+
+          Button(
+            onClick = { onJoinCommunity(comm) },
+            colors = ButtonDefaults.buttonColors(
+              containerColor = if (comm.isJoined) NeonCyan.copy(alpha = 0.08f) else Color.Transparent
+            ),
+            border = BorderStroke(1.dp, if (comm.isJoined) NeonCyan.copy(alpha = 0.3f) else NeonCyan),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.height(32.dp),
+            shape = RoundedCornerShape(12.dp)
+          ) {
+            Text(
+              if (comm.isJoined) "Joined ✓" else "Join",
+              color = if (comm.isJoined) NeonCyan.copy(alpha = 0.7f) else NeonCyan,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold
+            )
+          }
+        }
+      }
+    }
+  }
+
+  // Selected Explorer Profile dialog overlay
+  if (selectedExplorerForProfile != null) {
+    val exp = selectedExplorerForProfile!!
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .background(Color.Black.copy(alpha = 0.73f))
+        .clickable { selectedExplorerForProfile = null },
+      contentAlignment = Alignment.Center
+    ) {
+      Surface(
+        modifier = Modifier
+          .fillMaxWidth(0.85f)
+          .wrapContentHeight()
+          .clickable(enabled = false) {},
+        color = GlassyCard,
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+      ) {
+        Column(
+          modifier = Modifier.padding(24.dp),
+          horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+          Box(
+            modifier = Modifier
+              .size(80.dp)
+              .clip(CircleShape)
+              .background(Brush.linearGradient(listOf(NeonCyan, SoftNeonMint)))
+              .padding(3.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Box(
+              modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(DeepObsidian),
+              contentAlignment = Alignment.Center
+            ) {
+              Text(exp.moodEmoji ?: "📡", fontSize = 36.sp)
+            }
+          }
+
+          Spacer(modifier = Modifier.height(14.dp))
+
+          Text(
+            exp.displayName ?: exp.username,
+            color = Color.White,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 18.sp
+          )
+
+          Text(
+            "@${exp.username}",
+            color = NeonCyan,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+          )
+
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Text(
+            "Status: ${exp.moodState ?: "Exploring Savannah shores"}",
+            color = Color.LightGray,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center
+          )
+
+          Text(
+            "Cosmic Level: ${(exp.xp ?: 100) / 100} • XP Balance: ${exp.xp ?: 100}",
+            color = Color.Gray,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+          )
+
+          Spacer(modifier = Modifier.height(20.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+          ) {
+            Button(
+              onClick = { selectedExplorerForProfile = null },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = Color.White.copy(alpha = 0.05f),
+                contentColor = Color.Gray
+              ),
+              modifier = Modifier.weight(1f),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Text("Close", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+              onClick = {
+                onInitiateDM(exp)
+                selectedExplorerForProfile = null
+              },
+              colors = ButtonDefaults.buttonColors(
+                containerColor = NeonCyan,
+                contentColor = Color.Black
+              ),
+              modifier = Modifier.weight(1.3f),
+              shape = RoundedCornerShape(12.dp)
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = Icons.Default.Send, contentDescription = "Send PM", modifier = Modifier.size(12.dp), tint = Color.Black)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Whisper DM", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+        }
       }
     }
   }
 }
-
 
 // ==============================================================================
 // 5. IDENTITY MY PROFILE TAB
@@ -4159,6 +4555,14 @@ fun IdentityTab(
   var isEditOtpChecking by remember { mutableStateOf(false) }
   var isEditOtpWrong by remember { mutableStateOf(false) }
 
+  // Preset cybernetic avatars helper
+  val avatarPresets = listOf(
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150",
+    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150",
+    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150",
+    "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=150"
+  )
+
   if (showEditProfileDialog) {
     Surface(
       modifier = Modifier
@@ -4683,7 +5087,35 @@ fun IdentityTab(
                 }
               }
 
-              
+              item {
+                Text("Avatar Icon Presets", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                  horizontalArrangement = Arrangement.spacedBy(10.dp),
+                  modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                  avatarPresets.forEach { url ->
+                    val isSelected = editAvatarInput == url
+                    Box(
+                      modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .border(
+                          width = if (isSelected) 3.dp else 1.dp,
+                          color = if (isSelected) SoftNeonMint else Color.White.copy(alpha = 0.15f),
+                          shape = CircleShape
+                        )
+                        .clickable { editAvatarInput = url }
+                    ) {
+                      AsyncImage(
+                        model = url,
+                        contentDescription = "Avatar preset option",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                      )
+                    }
+                  }
+                }
+              }
+
               item {
                 Text("Custom Profile Picture", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
@@ -5390,15 +5822,20 @@ fun BentoAuthScreen(
                   )
                   Spacer(modifier = Modifier.height(4.dp))
                   Text(
-                    text = "A secure verification code has been dispatched to: ${forgotSentEmailAddress.let { email ->
-                      if (email.contains("@")) {
-                          val parts = email.split("@")
-                          "${parts[0].take(2)}•••••••${parts[0].takeLast(1)}@${parts[1]}"
-                      } else email
-                    }}",
+                    text = "A secure verification code has been dispatched to: $forgotSentEmailAddress",
                     color = Color.LightGray,
                     fontSize = 12.sp
                   )
+
+                  if (forgotDebugOtp != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                      text = "(Telemetry Debug Code: $forgotDebugOtp)",
+                      color = SoftNeonMint,
+                      fontSize = 12.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                  }
 
                   Spacer(modifier = Modifier.height(16.dp))
 
@@ -5430,18 +5867,6 @@ fun BentoAuthScreen(
                     )
                   }
 
-                  Spacer(modifier = Modifier.height(20.dp))
-
-                  // Back button
-                  TextButton(
-                    onClick = { forgotPasswordStep = 1; forgotErrorMessage = "" },
-                    modifier = Modifier.fillMaxWidth()
-                  ) {
-                    Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Back")
-                  }
-                  
                   Spacer(modifier = Modifier.height(20.dp))
 
                   val isOtpLengthCompleted = forgotOtpInput.trim().length == 6
@@ -6748,7 +7173,7 @@ fun ValidationChip(
 
 // Shimmer skeleton loader helper
 @Composable
-fun ShimmerPlaceholder2(
+fun ShimmerPlaceholder(
   modifier: Modifier = Modifier,
   shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp)
 ) {
@@ -6985,22 +7410,6 @@ fun saveAllPostsToLocalStorage(context: Context, posts: List<MobilePost>) {
   } catch (e: Exception) {
     e.printStackTrace()
   }
-}
-
-
-@Composable
-fun ShimmerPlaceholder(modifier: Modifier = Modifier, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(12.dp)) {
-  val transition = rememberInfiniteTransition(label = "shimmer")
-  val alpha by transition.animateFloat(
-    initialValue = 0.2f,
-    targetValue = 0.6f,
-    animationSpec = infiniteRepeatable(
-      animation = tween(1000, easing = LinearEasing),
-      repeatMode = RepeatMode.Reverse
-    ),
-    label = "shimmer"
-  )
-  Box(modifier = modifier.clip(shape).background(Color.White.copy(alpha = alpha)))
 }
 
 fun getLocalStoredPosts(context: Context): List<MobilePost> {
