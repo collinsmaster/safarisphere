@@ -76,7 +76,12 @@ module.exports = {
   
   query: async (text, params) => {
     if (pool) {
-      return await pool.query(text, params);
+      try {
+        return await pool.query(text, params);
+      } catch (err) {
+        console.error(`[PostgreSQL Query Error] Query: ${text}, Params: ${JSON.stringify(params)}, Error: ${err.message}`);
+        throw err;
+      }
     } else {
       console.log(`[PostgreSQL Mock Query] ${text.slice(0, 100)}...`);
       return { rows: [], rowCount: 0 };

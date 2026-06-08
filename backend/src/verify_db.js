@@ -32,8 +32,11 @@ async function verifyTables() {
     }
 
     // Check for posts
-    const postsRes = await pool.query('SELECT COUNT(*) FROM posts');
-    console.log(`Total posts in database: ${postsRes.rows[0].count}`);
+    const postsRes = await pool.query('SELECT * FROM posts');
+    console.log(`Total posts in database: ${postsRes.rows.length}`);
+    if (postsRes.rows.length > 0) {
+      console.log('Sample post:', JSON.stringify(postsRes.rows[0]));
+    }
 
     // Check for users
     const usersRes = await pool.query('SELECT COUNT(*) FROM users');

@@ -26,6 +26,8 @@ router.get('/', authMiddleware, async (req, res) => {
       }
 
       queryText += ' ORDER BY p.created_at DESC LIMIT 50';
+      console.log(`[Posts] Executing query: ${queryText}`);
+      console.log(`[Posts] Parameters: ${JSON.stringify(params)}`);
       const feedRes = await dbService.query(queryText, params);
       console.log(`[Posts] DB returned ${feedRes.rows.length} posts.`);
       posts = feedRes.rows;
@@ -97,12 +99,18 @@ router.post('/', authMiddleware, async (req, res) => {
     };
 
     if (!dbService.isMock) {
-      await dbService.query(
-        `INSERT INTO posts 
-          (id, author_id, content, media_url, media_type, vibe_category, lat, lng, location_name) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [postId, req.user.id, content || '', mediaUrl, mediaType, vibeCategory, lat, lng, locationName]
-      );
+      try {
+        await dbService.query(
+          `INSERT INTO posts 
+            (id, author_id, content, media_url, media_type, vibe_category, lat, lng, location_name) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [postId, req.user.id, content || '', mediaUrl, mediaType, vibeCategory, lat, lng, locationName]
+        );
+        console.log(`[Posts] Post inserted successfully into DB for user ${req.user.id}. PostId: ${postId}`);
+      } catch (dbErr) {
+        console.error(`[Posts] Error inserting post into DB: ${dbErr.message}`);
+        return res.status(500).json({ error: 'DB Insert Failed: ' + dbErr.message });
+      }
     } else {
       const store = dbService.getMockStore();
       const profile = store.profiles[req.user.id] || {};
