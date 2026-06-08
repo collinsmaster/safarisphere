@@ -16,7 +16,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import coil.request.ImageRequest
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -578,7 +580,12 @@ fun FeedTab(
               } else {
                 // Image card load via AsyncImage with dynamic aspect ratio, rotation, and filter mapping
                 AsyncImage(
-                  model = post.mediaUrl,
+                  model = coil.request.ImageRequest.Builder(LocalContext.current)
+                    .data(post.mediaUrl)
+                    .crossfade(true)
+                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                    .build(),
                   contentDescription = "Post Media Image Attachment",
                   modifier = mediaModifier,
                   contentScale = if (metadata.ratio == null || metadata.ratio == "Original") androidx.compose.ui.layout.ContentScale.Fit else androidx.compose.ui.layout.ContentScale.Crop,
@@ -616,16 +623,17 @@ fun FeedTab(
               }
 
               // Repost Mock Metric
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                  imageVector = Icons.Default.Share,
-                  contentDescription = "Repost",
-                  tint = Color(0xFF90A4AE),
-                  modifier = Modifier.size(18.dp).clickable { /* Repst simulation */ }
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("3", color = Color(0xFF90A4AE), fontSize = 12.sp)
-              }
+              // Removed because reposts are not currently implemented
+              // Row(verticalAlignment = Alignment.CenterVertically) {
+              //   Icon(
+              //     imageVector = Icons.Default.Share,
+              //     contentDescription = "Repost",
+              //     tint = Color(0xFF90A4AE),
+              //     modifier = Modifier.size(18.dp).clickable { /* Repst simulation */ }
+              //   )
+              //   Spacer(modifier = Modifier.width(6.dp))
+              //   Text("3", color = Color(0xFF90A4AE), fontSize = 12.sp)
+              // }
 
               // Fully Functional Comments button triggering comments detail corridors!
               Row(

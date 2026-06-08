@@ -6472,15 +6472,16 @@ fun BentoAuthScreen(
           colors = listOf(DeepObsidian, Color(0xFF101014), DeepObsidian)
         )
       )
-      .padding(16.dp)
-      .imePadding(),
-    contentAlignment = Alignment.Center
+      .padding(16.dp),
+    contentAlignment = Alignment.TopCenter
   ) {
     LazyColumn(
       modifier = Modifier
-        .fillMaxWidth()
-        .widthIn(max = 480.dp),
-      verticalArrangement = Arrangement.spacedBy(16.dp),
+        .fillMaxSize()
+        .widthIn(max = 480.dp)
+        .imePadding()
+        .align(Alignment.Center),
+      verticalArrangement = Arrangement.Center,
       contentPadding = PaddingValues(vertical = 24.dp)
     ) {
       item {
@@ -7792,17 +7793,21 @@ fun BentoAuthScreen(
               OutlinedTextField(
                 value = confirmPasswordInput,
                 onValueChange = { confirmPasswordInput = it },
-                placeholder = { Text("••••••••", color = Color.Gray) },
+                enabled = isPasswordStrong,
+                placeholder = { Text("••••••••", color = Color.Gray.copy(alpha = if (isPasswordStrong) 1f else 0.5f)) },
                 visualTransformation = PasswordVisualTransformation(),
                 colors = OutlinedTextFieldDefaults.colors(
                   focusedBorderColor = confirmPasswordBorderColor,
                   unfocusedBorderColor = confirmPasswordBorderColor,
+                  disabledBorderColor = Color.DarkGray.copy(alpha = 0.3f),
                   focusedTextColor = Color.White,
-                  unfocusedTextColor = Color.White
+                  unfocusedTextColor = Color.White,
+                  disabledTextColor = Color.Gray.copy(alpha = 0.5f)
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                   .fillMaxWidth()
+                  .alpha(if (isPasswordStrong) 1f else 0.5f)
                   .onFocusChanged { isConfirmPasswordFocused = it.isFocused }
                   .testTag("signup_confirm_password_input"),
                 singleLine = true
@@ -8114,7 +8119,7 @@ fun VideoPlayerView(
 ) {
   val context = LocalContext.current
   val cleanUrl = remember(mediaUrl) {
-    if (mediaUrl.isNullOrEmpty() || mediaUrl.contains("mixkit") || !mediaUrl.startsWith("http")) {
+    if (mediaUrl.isNullOrEmpty()) {
       "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
     } else {
       mediaUrl
@@ -8168,7 +8173,7 @@ fun ModernPullToRefresh(
   content: @Composable () -> Unit
 ) {
   var pullOffset by remember { mutableStateOf(0f) }
-  val maxPullOffset = 260f
+  val maxPullOffset = 400f
   val coroutineScope = rememberCoroutineScope()
 
   val nestedScrollConnection = remember(isRefreshing) {
@@ -8177,9 +8182,9 @@ fun ModernPullToRefresh(
         if (isRefreshing) return Offset.Zero
         if (available.y < 0 && pullOffset > 0f) {
           val prevOffset = pullOffset
-          pullOffset = (pullOffset + available.y * 0.5f).coerceAtLeast(0f)
+          pullOffset = (pullOffset + available.y * 0.3f).coerceAtLeast(0f)
           val delta = pullOffset - prevOffset
-          return Offset(0f, delta / 0.5f)
+          return Offset(0f, delta / 0.3f)
         }
         return Offset.Zero
       }
@@ -8192,15 +8197,15 @@ fun ModernPullToRefresh(
         if (isRefreshing) return Offset.Zero
         if (available.y > 0f) {
           val prevOffset = pullOffset
-          pullOffset = (pullOffset + available.y * 0.5f).coerceAtMost(maxPullOffset)
+          pullOffset = (pullOffset + available.y * 0.3f).coerceAtMost(maxPullOffset)
           val delta = pullOffset - prevOffset
-          return Offset(0f, delta / 0.5f)
+          return Offset(0f, delta / 0.3f)
         }
         return Offset.Zero
       }
 
       override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-        if (pullOffset > 160f) {
+        if (pullOffset > 350f) {
           onRefresh()
         }
         coroutineScope.launch {
